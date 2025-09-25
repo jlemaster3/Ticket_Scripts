@@ -3,7 +3,12 @@
 #-------------------------------------------------
 
 '''
-Ticket RITM0214643 
+Ticket RITM0214643
+
+Copy working files from source WIXIX\\SETE to working directory if the file does not containe any of the following:
+
+    "D5SYS_SMON", "D7SYS_AM", "D7SYS_NDY", "D7SYS_SMND", "MSYS_PATCH", "WSYS_SPCE"
+    
 '''
 
 #-------------------------------------------------
