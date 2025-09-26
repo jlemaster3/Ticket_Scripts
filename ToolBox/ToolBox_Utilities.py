@@ -7,7 +7,7 @@ from ToolBox.ToolBox_logger import OutputLogger
 from ToolBox.ToolBox_Object import ToolBox_FileData
 
 #-------------------------------------------------
-#   Functions
+#   Global - Functions
 #-------------------------------------------------
 
 def gather_files (
@@ -18,7 +18,8 @@ def gather_files (
         excludeFileFormats:list[str]=None,
         isolateByDirectories:list[str] = None, 
         isolateByFileNames:list[str]=None,
-    ) -> list[ToolBox_FileData] | None:
+        quite_logging:bool = False
+    ) -> dict[str,ToolBox_FileData] | None:
     """Gathers refferences to all files in each provided source path, filtering for file formats, directory paths, and file names"""
     log = OutputLogger.get_instance()
     _known_file_formats = [fmt.lower() for fmt in file_types]
@@ -36,7 +37,7 @@ def gather_files (
     _totalCounter = 0
     _collectedCounter = 0
     _relPaths = {}
-    _found_file_list:list[ToolBox_FileData] = []
+    _found_file_list:dict[str,ToolBox_FileData] = {}
     if not(os.path.exists(source_path)):
         log.warning(f"Unable to find path in sourcePaths List. target Path: '{source_path}'")
         return None
@@ -95,29 +96,43 @@ def gather_files (
             #Checks is file should be added to data set:
             if (_should_add == False):
                 _reasons = ', '.join([f'"{_sc+1}":"{_str}"' for _sc, _str in enumerate(_excludeText)])
-                log.debug(f"Excluding File from collection : '{_filePath}' | {_reasons}")
+                if (quite_logging != True): log.debug(f"Excluding File from collection : '{_filePath}' | {_reasons}")
             else:
-                log.debug(f"Adding File to collection : '{_filePath}'")
+                if (quite_logging != True): log.debug(f"Adding File to collection : '{_filePath}'")
                 _relPath = os.path.relpath(dir_path,source_path)
                 if _relPath not in _relPaths.keys():
                     _relPaths[_relPath] = []
                 
                 _relPaths[_relPath].append(file)
                 _fileData = ToolBox_FileData(os.path.join (source_path,_relPath,file), rootPath=source_path)
-                _found_file_list.append(_fileData)
+                _found_file_list[_fileData.id] = _fileData
                 _collectedCounter += 1
-    log.info(f"Found [{_collectedCounter}] Files out of [{_totalCounter}] files.")
-    log.info(f"from [{len(_relPaths)}] directories:",data = _relPaths)
+    log.info(f"Collected [{_collectedCounter}] Files out of [{_totalCounter}] files in [{len(_relPaths)}] diffrent sub-directories : ",data = _relPaths)
     return _found_file_list
 
-
-def filter_fileList_by_terms (file_list:list[ToolBox_FileData], search_terms:list[str]):
+# find way to convert filter to use criteria defiend by user as keyword : value ot keyword : lambda or keyword : function(*args **kwargs)
+def filter_fileList_by_terms (file_list:list[ToolBox_FileData]|dict[str,ToolBox_FileData], search_terms:list[str]):
     """Loops over the list of filePaths provided, and returns a list of file paths with files that containe the defiend search_terms"""
-    log = OutputLogger.get_instance()
     file_holder = []
-    for file in file_list:
-        _lineid_terms = file.search_for_terms (search_terms)
-        if len(_lineid_terms) >= 1:
-            file_holder.append(file)            
+    if isinstance(file_list, list):
+        for file in file_list:
+            _lineid_terms = file.search_for_terms (search_terms)
+            if len(_lineid_terms) >= 1:
+                file_holder.append(file.sourceFilePath)            
+    elif isinstance(file_list, dict):
+        for file in file_list.values():
+            _lineid_terms = file.search_for_terms (search_terms)
+            if len(_lineid_terms) >= 1:
+                file_holder.append(file.sourceFilePath)
     return file_holder
 
+
+def clean_relPath_List (path_list:list[str]) -> str:
+    """Removes common prefix folders form list of paths"""
+    log = OutputLogger.get_instance()
+    if not path_list or len(path_list) == 0 :
+        log.warning(f"Invalid path list provided.", data=path_list)
+        return None
+    _common_prefix = os.path.commonprefix(path_list)
+    _result_paths = [path.removeprefix(_common_prefix) for path in path_list]
+    return _result_paths
