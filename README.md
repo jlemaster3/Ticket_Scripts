@@ -1,3 +1,3 @@
 Tickets are currently built as independent scripts
 
-The ‘/core/’ directory is for a work in progress single toolbox of toolsets, it is not ready for use.
+The ‘/ToolBox/’ directory is for a work in progress single import for a set of tools for mass IWS Jil file manipulation, it is still a Work in Progress and expanding.
