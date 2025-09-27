@@ -2,14 +2,13 @@
 #   Imports
 #-------------------------------------------------
 
-import logging, os, re, json, sys, uuid, copy
+import logging, os, json, sys, shutil, copy, uuid
 
 import threading
 
-from collections import UserDict
 from enum import Enum, StrEnum
 from datetime import datetime as dt
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 #-------------------------------------------------
 #   Enum Classes
@@ -33,6 +32,22 @@ class ValidIWSFileFormat(StrEnum):
 class ValidConfigFileFormat(StrEnum):
     JSON = 'json'
 
+
+class IWS_OBJ_TYPE(StrEnum):
+    UNDEFINED = 'undefined'
+    WORKSTATION = 'workstation'
+    FOLDER = 'folder'
+    JOBSTREAM = 'jobstream'
+    JOB = 'job'
+    RUNCYCLE = 'runcycle'
+    FOLLOWS = 'follows'
+
+class IWS_LINK_TYPE (StrEnum):
+    UNDEFINED = 'undefined'
+    STREAM_TO_JOB = 'stream_to_job'
+    FOLLOWS = 'follows'
+    NEEDS = 'needs'
+
 #-------------------------------------------------
 #   Logger Classes
 #-------------------------------------------------
@@ -40,41 +55,59 @@ class ValidConfigFileFormat(StrEnum):
 class OutputLogger(logging.Logger):
     _instance = None
     _lock = threading.Lock()  # Ensures thread-safe singleton creation
+    _log_name:str = "IWS_ToolBox"
+    _log_folder:str = None
+    _log_fileName:str = None
+    _log_level:int = None
 
-    def __new__(cls, log_folder:str=None, log_file:str=f"log_{str(dt.now().date()).replace('-','')}.log"):
+    def __new__(cls, log_folder=None, log_file=None, level=logging.DEBUG, *args, **kwargs):
         with cls._lock:
             if cls._instance is None:
-                cls._instance = super(OutputLogger, cls).__new__(cls)
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
+                cls._log_folder = log_folder
+                cls._log_fileName = log_file
+                cls._log_level = level
             return cls._instance
 
-    def __init__ (self, log_folder:str=None, log_file: str=f"log_{str(dt.now().date()).replace('-','')}.log", level: int = logging.DEBUG):
+    def __init__ (self, log_folder=None, log_file=None, level=logging.DEBUG):
         if getattr(self, "_initialized", False):
             return
-        _folder_path = None
-        if (log_folder != None and os.path.exists(log_folder) and os.path.isdir(log_folder)):
-            _folder_path = log_folder  
-        elif getattr(sys, 'frozen', False):
-            _folder_path = os.path.dirname(sys.executable)
-        elif __file__:
-            _folder_path = os.path.dirname(os.path.abspath(__file__))
-        logging.Logger.__init__(self, name="App", level=level)
-        os.makedirs(_folder_path, exist_ok=True)
-        log_path = os.path.join(_folder_path, log_file)
-        # File handler
-        fh = logging.FileHandler(log_path, encoding="utf-8", mode='w')
-        fh.setLevel(level)
-        file_format = logging.Formatter('{asctime} | {levelname:<8s} | {funcName} | {message}',datefmt="%Y-%m-%d %H:%M:%S", style='{')
-        fh.setFormatter(file_format)
-        self.addHandler(fh)
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.ERROR)
-        console_format = logging.Formatter("[%(levelname)s]: %(message)s")
-        ch.setFormatter(console_format)
-        self.addHandler(ch)
         self._initialized = True
 
-    def get_logger(self):
+    def init_logger(self, log_folder=None, log_file=None, level=logging.DEBUG):        
+        # Use instance variables set in __new__
+        _log_folder = self._log_folder
+        _log_file = self._log_fileName if self._log_fileName is not None else log_file if log_file is not None else f"{self._log_name}_{str(dt.now().date()).replace('-','')}.log"  
+        _level = self._log_level if self._log_level is not None else level
+        if log_folder is None and _log_folder is None and getattr(sys, 'frozen', False):
+            _log_folder = os.path.dirname(sys.executable)
+        elif log_folder is None  and _log_folder is None and __file__:
+            _log_folder = os.path.dirname(os.path.abspath(__file__))
+        elif log_folder is not None and os.path.exists(log_folder) and os.path.isfile(log_folder):
+            _log_folder = os.path.basename(log_folder)
+        elif log_folder is not None and os.path.exists(log_folder) and os.path.isdir(log_folder):
+            _log_folder = log_folder
+        elif log_folder is not None and not os.path.exists(log_folder) and os.path.isdir(log_folder):
+            os.makedirs(log_folder, exist_ok=True)
+            _log_folder = log_folder
+        os.makedirs(_log_folder, exist_ok=True)
+        super().__init__(self._log_name, _level)
+        _log_path = os.path.join(_log_folder, _log_file)
+        _fileHandler = logging.FileHandler(_log_path, mode='w', encoding='utf-8')
+        _fileHandler.setLevel(_level)
+        _formatter = logging.Formatter('{asctime} | {levelname:<8s} | {funcName} | {message}', datefmt="%Y-%m-%d %H:%M:%S", style='{')
+        _fileHandler.setFormatter(_formatter)
+        self.addHandler(_fileHandler)
+        _streamHandler = logging.StreamHandler()
+        _streamHandler.setLevel(logging.WARNING)
+        _streamHandler.setFormatter(_formatter)
+        self.addHandler(_streamHandler)
+        self.propagate = True 
+
+    @classmethod
+    def get_instance(self) -> "OutputLogger":
+        """Returns the singleton instance of OutputLogger."""
         return self._instance
 
     def _log_with_data(self, level, message, data=None, *args, **kwargs):
@@ -138,105 +171,248 @@ class OutputLogger(logging.Logger):
 #   Data container Classes
 #-------------------------------------------------
 
-class Found_File_Path:
-    """Contains data about file locations, does not contain file data or refrences to internal file values."""
+class IWS_TEXT_obj :
+    _logger:OutputLogger = OutputLogger().get_instance()
+    _idKey:str|int
     _name:str
-    _foramt:str
-    _rootPath:str
-    _fullPath:str
-    _relPath:str
-    _logger:OutputLogger = OutputLogger().get_logger()
-    _delimiter = "."
+    _type:IWS_OBJ_TYPE
+    _sourceFilePath:str
+    _sourceRawText:dict[int,str]
+    _connectionKeys:list[str]
 
-    def __init__ (self, sourcePath:str, rootPath:str|None=None) :
-        if (not os.path.exists (sourcePath) or (not os.path.isfile(sourcePath))):
-            self._logger.log(LogLevel.WARNING, f"Source file does not exist : '{sourcePath}'")
-            return
-        self._fullPath = sourcePath
-        _base_split = os.path.basename(self._fullPath).split('.')
-        self._name = _base_split[0].strip()
-        self._foramt = _base_split[1].strip().lower()
-        if (rootPath is not None and os.path.exists(rootPath)): 
-            self._rootPath = rootPath
-            self.set_relPath_from_rootPath(rootPath)
+    def __init__ (self, name:str, objType:str|IWS_OBJ_TYPE, lineData:dict[int,str], sourceFilePath:str, idKey:str|int=None) :
+        self._idKey = uuid.uuid4() if idKey == None else idKey
+        self._name = name
+        self._type = IWS_OBJ_TYPE[objType] if objType in IWS_OBJ_TYPE.__members__ else IWS_OBJ_TYPE.UNDEFINED
+        self._sourceFilePath = sourceFilePath
+
+        for _k, _v in lineData:
+            if _k not in self._sourceRawText.keys():
+                self._sourceRawText[_k] = _v
 
     @property
-    def name(self):
-        """Getter method for 'name' attribute."""
-        return self._name
-    @property
-    def format(self):
-        """Getter method for 'foramt' attribute."""
-        return self._foramt
-    @property
-    def fullPath(self):
-        """Getter method for 'fullPath' attribute."""
-        return self._fullPath
+    def idKey(self) -> str:
+        """Retrieves object IdKey."""
+        return self._idKey
     
     @property
-    def rootPath(self):
-        """Getter method for 'rootPath' attribute."""
-        return self._rootPath
+    def name(self) -> str:
+        """Retrieves object name."""
+        return self._name.strip()
     
+    @name.setter
+    def name (self, new_value:str):
+        if not isinstance(new_value, (str)):
+            self._logger.error(f"Value of 'name' must be of type 'string' was provided as type : '{type(new_value)}'")
+            raise TypeError(f"Value of 'name' must be of type 'string' was provided as type : '{type(new_value)}'")
+        if new_value.strip() == '':
+            self._logger.error(f"Value of 'name' was provided as a blank string, new_value : '{new_value}'")
+        self._name = new_value.strip()
+
     @property
-    def relPath(self):
-        """Getter method for 'relPath' attribute."""
-        return self._relPath
+    def type(self) -> str:
+        """Retrieves object type."""
+        return self._type
 
-    def set_relPath_from_rootPath (self, rootPath:str) -> str:
-        """Determins relitave path from provided root path"""
-        if (not os.path.exists (rootPath) or (not os.path.isdir(rootPath))):
-            self._logger.warning(f"Provided root path does not exist : '{rootPath}'")
-            return
-        elif (rootPath.lower() not in self._fullPath.lower()):            
-            self._logger.warning(f"Provided rootPath can not be found in file's source path.\n   filePath: '{self._fullPath}'\n   rootPath: '{rootPath}'")
-        self._relPath = os.path.relpath(os.path.dirname(self.fullPath), self._rootPath)
-        return self._relPath
-
-
-class Loaded_Config_File (Found_File_Path):
-    """Loads and stores data found in designated Config files."""
-    _data:dict[str,Any] = {}
-    _delimiter = "."
-
-    def __init__ (self, sourcePath:str, rootPath:str|None=None):
-        super(sourcePath, rootPath)
-
-    def loadFile (self) :
-        """Loads data found in target config file in self._fullPath"""
-        if self._fullPath.strip().lower().endswith('.json'):
-            self._data = json.loads(self._fullPath)
-        if self._fullPath.strip().lower().endswith('.yaml'):
-            self._data = json.loads(self._fullPath)
-
-    
     @classmethod
-    def get(cls, key: str, default: Any = None) -> Any:
-        """Retrieves a value from the settings dictionary using a delimiter-separated key."""
-        keys = key.split(cls._delimiter)
-        value = cls._data
-        try:
-            for k in keys:
-                value = value[k]
-            return value
-        except (KeyError, TypeError):
-            return default
+    def add_line (self, lineIndex:str, lineContent:str, overwrite:bool=False) -> bool :
+        if (overwrite == True):
+            self._sourceRawText[lineIndex] = lineContent
+            return True
+        else:
+            if lineIndex not in self._sourceRawText.keys():
+                self._sourceRawText[lineIndex] = lineContent
+                return True
+            else:
+                self._logger.warning(f"Source line key [{lineIndex}] is already defined in IWS Object {self._name}")
+        return False
+
+
+class IWS_OBJ_LINK:
+    _logger:OutputLogger = OutputLogger().get_instance()
+    _idKey:str|int
+    _type:IWS_LINK_TYPE
+    _fromKey:str|int
+    _toKey:str|int
+
+    def __init__ (self, fromKey:str|int, toKey:str|int, type:str|IWS_LINK_TYPE,  sourceFilePath:str, idKey:str|int=None) :
+        self._idKey = uuid.uuid4() if idKey == None else idKey
+        self._type = IWS_LINK_TYPE[type] if type in IWS_LINK_TYPE.__members__ else IWS_LINK_TYPE.UNDEFINED
+        self._sourceFilePath = sourceFilePath
+        self._fromKey = fromKey
+        self._toKey = toKey
+
+    @property
+    def idKey(self) -> str:
+        """Retrieves object IdKey."""
+        return self._idKey
+    
+    @property
+    def type(self) -> IWS_LINK_TYPE:
+        """Retrieves IWS Connection Type."""
+        return self._type
+    
+    @type.setter
+    def type (self, new_value:str|IWS_LINK_TYPE):
+        if not isinstance(new_value, (str, IWS_LINK_TYPE)):
+            self._logger.error(f"Value of 'type' must be of type 'string' or predefined in was provided as one f the following [{', '.join(_mem.name for _mem in IWS_LINK_TYPE)}] : '{type(new_value)}'")
+            raise TypeError(f"Value of 'type' must be of type 'string' or predefined in was provided as one f the following [{', '.join(_mem.name for _mem in IWS_LINK_TYPE)}] : '{type(new_value)}'")
+        if new_value.strip() == '':
+            self._logger.error(f"Value of 'type' was provided as a blank string")
+        self.type = IWS_LINK_TYPE[new_value] if new_value in IWS_LINK_TYPE.__members__ else IWS_LINK_TYPE.UNDEFINED
+
+
+class ToolBox_Step:
+    _logger:OutputLogger = OutputLogger().get_instance()
+    _name:str
+
+    _sourcePaths:list[str] = []
+    _sourceFileFormats:list[str] = [fmt.value for fmt in ValidIWSFileFormat]
+    _configFileFormats:list[str] = [fmt.value for fmt in ValidConfigFileFormat]
+
+    # folder path and file terms to isolate or exclude from processing
+    _excludeDirNames:list[str] = []
+    _excludeFileNames:list[str] = []
+    _excludeFileFormats:list[str] = []
+    _found_files:list[dict[str,str]] = []
         
+    def __init__ (self, name:str) :
+        self._name = name
+        self._sourcePaths = []
+        self._sourceFileFormats = [fmt.value for fmt in ValidIWSFileFormat]
+        self._configFileFormats = [fmt.value for fmt in ValidConfigFileFormat]
+        self._excludeDirNames = []
+        self._excludeFileNames = []
+        self._excludeFileFormats = []
+        self._found_files = []
+
+    @property
+    def name(self) -> str:
+        """Retrieves step name."""
+        return self._name.strip()
+    
+    @property
+    def fileCount(self) -> int:
+        """Retrieves step name."""
+        return len(self._found_files)
+    
+    @property
+    def fileList_FullPath(self) -> list[str]:
+        """Retrieves returns list of found file paths."""
+        return ([os.path.join(_f['rootPath'], _f['relPath'], _f['fileName']) for _f in self._found_files])
+    
+    @property
+    def fileList_RelPath(self) -> list[str]:
+        """Retrieves returns list of found file paths."""
+        return (set([os.path.join(_f['relPath'], _f['fileName']) for _f in self._found_files]))
+    
+    @property
+    def fileList_fileName(self) -> list[str]:
+        """Retrieves returns list of found file paths."""
+        return (set([_f['fileName'] for _f in self._found_files]))
+    
     @classmethod
-    def __getitem__(cls, key: str) -> Any:
-        return cls.get(key)
+    def add_sourcePath (self, sourcePath:str):
+        """Adds Directory or Folder path to source path list, used when collecting and filtering files."""
+        if os.path.exists(sourcePath) and os.path.isdir(sourcePath):
+            if sourcePath not in self._sourcePaths:
+                self._logger.debug(f"Added to sourcePath list : '{sourcePath}'")
+                self._sourcePaths.append(sourcePath)
+            else:
+                self._logger.debug(f"Skipping source Path '{sourcePath}' - alredy loaded or not a valid folder path.")
+        return self
+    
+    @classmethod
+    def gather_files (self, excludedDirectories:list[str] = None, excludedFileNames:list[str]=None, excludeFileFormats:list[str]=None):
+        """Gathers refferences to all files in each provided source path, filtering for file formats, directory paths, and file names"""
+        if len(self._sourcePaths) == 0 :
+            self._logger.warning("Unable to collect source files, no source paths have been loaded, use IWS_ToolBox.add_sourcePath() first to add a path")
+        _known_file_formats = set([fmt.lower() for fmt in self._sourceFileFormats])# + [e for e in self.configFileFormats])
+        self._logger.info(f"Valid File Formats", data=self._sourceFileFormats)
+        self._logger.info(f"Valid Config File Formats", data=self._configFileFormats)
+        self._excludeFileNames = excludedFileNames if excludedFileNames != None else []
+        self._excludeDirNames = excludedDirectories if excludedDirectories != None else []
+        self._excludeFileFormats = excludeFileFormats if excludeFileFormats != None else []
+        if len(self._excludeDirNames) >= 1 : self._logger.info(f"Exclude Directory Paths containing Terms : ", data=self._excludeDirNames)
+        if len(self._excludeFileNames) >= 1 : self._logger.info(f"Exclude Files Names containing Terms : ", data=self._excludeFileNames)
+        if len(self._excludeFileFormats) >= 1 : self._logger.info(f"Exclude Foramts: : ", data=self._excludeFileFormats)
+        _totalCounter = 0
+        _collectedCounter = 0
+        _relPaths = {}
+        for _path in self._sourcePaths:
+            if not(os.path.exists(_path)):
+                self._logger.warning(f"Unable to find path in sourcePaths List. target Path: '{_path}'")
+                continue
+            for dir_path, dirs, files in os.walk(_path):
+                for file in files:
+                    _totalCounter +=1
+                    _should_add:bool = True
+                    _excludeText = []
+                    _filePath = os.path.join(dir_path,file)
+                    
+                    #Checks if directory path contains excluded directory term
+                    if len(self._excludeDirNames) >= 1:
+                        for _excludeDir in self._excludeDirNames:
+                            if (_excludeDir.lower() in dir_path.lower()) or (_excludeDir.lower() == dir_path.lower()):
+                                _excludeText.append(f"File path contains excluded directory term : '{_excludeDir}'")
+                                _should_add = False
 
+                    #Checks if file name contains an excluded file name term.
+                    if len(self._excludeFileNames) >= 1:
+                        for _excludeFileName in self._excludeFileNames:
+                            if (_excludeFileName.lower() in file.lower()):
+                                _excludeText.append(f"File path contains excluded file name : '{_excludeFileName}'")
+                                _should_add = False
 
-class Loaded_File_Data (UserDict):
-    """Loads and stores data found in target source file"""
-    _logger:OutputLogger = OutputLogger().get_logger()
+                    #Checks if file foramt ends with and of the known formats.
+                    if excludeFileFormats is not None and len(excludeFileFormats) >= 1:
+                        if not any([file.lower().endswith(fmt) for fmt in _known_file_formats]):
+                            _excludeText.append(f"File is not correct File Format : '*.{str(os.path.basename(file)).split('.')[-1]}'")
+                            _should_add = False
+                    
+                    #Checks is file should be added to data set:
+                    if (_should_add == False):
+                        _reasons = ', '.join([f'"{_sc+1}":"{_str}"' for _sc, _str in enumerate(_excludeText)])
+                        self._logger.debug(f"Excluding File from collection : '{_filePath}' | {_reasons}")
+                    else:
+                        self._logger.debug(f"Adding File to collection : '{_filePath}'")
+                        _relPath = os.path.relpath(dir_path,_path)
+                        if _relPath not in _relPaths.keys():
+                            _relPaths[_relPath] = []
+                        
+                        _relPaths[_relPath].append(file)
+                        self._found_files.append({
+                            "rootPath":_path,
+                            "relPath":_relPath,
+                            "fileName":file
+                        })
+                        _collectedCounter += 1
+        self._logger.info(f"Found [{_collectedCounter}] Files out of [{_totalCounter}] files.")
+        self._logger.info(f"from [{len(_relPaths)}] directories:",data = _relPaths)
+        return self
+    
+    @classmethod
+    def copyFilesTo (self, outputDir:str) :
+        _copyCounter = 0
+        for _file in self._found_files:
+            _source_path = os.path.join(_file['rootPath'], _file['relPath'], _file['fileName'])
+            _output_path = os.path.join(outputDir, _file['relPath'])
+            os.makedirs(_output_path, exist_ok=True)
+            try:
+                shutil.copy(_source_path, os.path.join(_output_path,_file['fileName']))
+                self._logger.debug (f"Copied File : '{os.path.join(_file['relPath'],_file['fileName'])}' output : '{os.path.join(_output_path,_file['fileName'])}'")
+                _copyCounter += 1
+            except PermissionError:
+                self._logger.error (f"Error: Permission denied when copying to '{_file}'.")
+            except Exception as e:
+                self._logger.info (f"An unexpected error occurred: {e}")
+        self._logger.info(f"Found [{_copyCounter}] Files out of [{len(self._found_files)}] files.")
+        return self
+    
+
+class ToolBox_loadedFileData:
+    _logger:OutputLogger = OutputLogger().get_instance()
     _sourceFile:str = None
-    _foundFilePath:Found_File_Path = None
-    _format:str = None
-    _rawLines:list[str] = []
-    _modifiedLines:list[str] = []
-    _canSearch:bool = False
-    _searchTerm_ids:dict[int, list[int]] = {}
     _stream_start_ids:list[int] = []
     _stream_edge_ids:list[int] = []
     _stream_END_ids:list[int] = []
@@ -248,41 +424,19 @@ class Loaded_File_Data (UserDict):
     _DESCRIPTION_ids:list[int] = []
     _DRAFT_ids:list[int] = []
     _FOLLOWS_ids:list[int] = []
-    _TASKTYPE_ids:list = []
-    _OUTPUTCOND_ids:list = []
+    _TASKTYPE_ids:list[int] = []
+    _OUTPUTCOND_ids:list[int] = []
     _RECOVERY_ids:list[int] = []
     _NOP_ids:list[int] = []
-    
-    def __init__(self, sourceFile:str|Found_File_Path):
-        try:
-            _path = sourceFile if isinstance(sourceFile, str) else sourceFile.fullPath
-            if not(os.path.isfile(_path)):
-                self._logger.error(f"Target source path is not a valid file : '{_path}'")
-                return
-            super().__init__()
-            self._sourceFile = _path
-            self._foundFilePath = sourceFile if isinstance(sourceFile, Found_File_Path) else None
-            self._format = str(os.path.basename(_path)).split('.')[-1]
-            source_file = open(_path, "r")
-            _rawText = source_file.read()
-            self._rawLines = str(_rawText).split('\n')
-            self._copy_rawText()
-            self._sort_line_ids()
 
-        except FileExistsError as fxe:
-            self._logger.error(f"Invalid file path : '{sourceFile}' - {fxe}")
+    _iws_objects:dict[str,IWS_TEXT_obj] = {}
+    _iws_obj_links:dict[str,IWS_OBJ_LINK]
 
-    def __setItem__ (self, key:str, value:Any):
-        if not isinstance(key,str):
-            raise TypeError("Keys must be string values.")
-        self.data[key] = value
-
-    def _copy_rawText (self):
-        self._modifiedLines = copy.deepcopy(self._rawLines)
-        self._canSearch = True if (len(self._rawLines) >= 1 and len(self._modifiedLines) >= 1) else False
-    
-    def _clear_line_ids (self):
-        self._searchTerm_ids = {}
+    def __init__(self, sourceFilePath:str):
+        if not(os.path.isfile(sourceFilePath)):
+            self._logger.error(f"Target source path is not a valid file : '{sourceFilePath}'")
+            return
+        self._sourceFile = sourceFilePath
         self._stream_start_ids = []
         self._stream_edge_ids = []
         self._stream_END_ids = []
@@ -294,14 +448,19 @@ class Loaded_File_Data (UserDict):
         self._DESCRIPTION_ids = []
         self._DRAFT_ids = []
         self._FOLLOWS_ids = []
-        self._TASKTYP = []
-        self._OUTPUTCON = []
+        self._TASKTYPE_ids = []
+        self._OUTPUTCOND_ids = []
         self._RECOVERY_ids = []
         self._NOP_ids = []
+        self._openFile()
 
-    def _sort_line_ids (self):
+    
+    def _openFile (self):
+        with open(self._sourceFile, "r") as f:
+            self._rawLines = copy.deepcopy(f.readlines())
         if len(self._rawLines) == 0:
             self._logger.warning (f"No lines loaded form source file : '{self._sourceFile}'")
+        
         for _line_id, _line in enumerate(self._rawLines):
             if "SCHEDULE" in str(_line).strip()[0:9]:
                 self._stream_start_ids.append(_line_id)
@@ -334,110 +493,78 @@ class Loaded_File_Data (UserDict):
             if "END" in str(_line).strip()[0:4] and 'ENDJOIN' not in str(_line).strip():
                 self._stream_END_ids.append(_line_id)
 
-    @property
-    def is_searchable (self) -> bool:
-        self._canSearch = True if (len(self._rawLines) >= 1 and len(self._modifiedLines) >= 1) else False
-        return self._canSearch
+        
+        for _i in range(len(self._job_start_ids)):
+            _iws_js_obj = IWS_TEXT_obj(
+                sourceFilePath = self._sourceFile,
+                name= self._rawLines[self._stream_start_ids[_i]].split(' ')[-1].split('/')[-1],
+                objType=IWS_OBJ_TYPE.JOBSTREAM,
+                lineData=self._rawLines[self._stream_start_ids[_i]:self._stream_edge_ids[_i] + 1],
+                idKey = uuid.uuid4()
+            )
+            _iws_js_obj.add_line(self._rawLines[self._stream_END_ids[_i]])
+            for _j in range(len(self._job_start_ids)):
+                job_start_id = self._job_start_ids[_j]
+                job_end_id = self._job_start_ids[_j+1]-1 if _j < len(self._job_start_ids) else self._stream_edge_ids[_i]
+                
+                if (self._stream_edge_ids[_i] <= self._job_start_ids[_j] <= self._stream_END_ids[_i]):
+                    _iws_job_obj = IWS_TEXT_obj(
+                        sourceFilePath = self._sourceFile,
+                        name= self._rawLines[job_start_id].split(' ')[-1].split('/')[-1],
+                        objType=IWS_OBJ_TYPE.JOB,
+                        lineData=self._rawLines[job_start_id:job_end_id],
+                        idKey = uuid.uuid4()
+                    )
+                    _new_link = IWS_OBJ_LINK(
+                        fromKey= _iws_js_obj.idKey,
+                        toKey= _iws_job_obj.idKey,
+                        type= IWS_LINK_TYPE.STREAM_TO_JOB,
+                        idKey= uuid.uuid4()
+                    )
+
+                    if _iws_job_obj.idKey not in self._iws_objects.keys():
+                        self._iws_objects[_iws_job_obj.idKey] = _iws_job_obj
+                    if _new_link.idKey not in self._iws_obj_links.keys():
+                        self._iws_obj_links[_new_link.idKey] = _new_link
+                        
+            if _iws_js_obj.idKey not in self._iws_objects.keys():
+                self._iws_objects[_iws_js_obj.idKey] = _iws_js_obj
+        return self
     
-    @property
-    def sourceFile(self) -> str:
-        """Getter method for 'relPath' attribute."""
-        return self._sourceFile
-    
-    @property
-    def jobStreamStartIndicies(self) -> list[int]:
-        """Getter method for 'relPath' attribute."""
-        return self._stream_start_ids
     
     @property
     def raw_text (self) -> str:
         """Returns the raw text from the source file un-edited."""
         return str('\n'.join(self._rawLines))
     
-    @property
-    def modified_text (self) -> str:
-        """returns the modified text as stored in memory."""
-        return str('\n'.join(self._modifiedLines))
-    
 
-    def search (self, terms:list[str], useRegExpess:bool=False) -> dict[str,list[tuple]]:
-        if (len(terms) == 0) or all(len(_str) == 0 for _str in terms):
-            self._logger.error(f"Invalid terms list, espected list of strings, received : ", terms)
-            return None
-        if (self.is_searchable == False or len(self._modifiedLines) == 0):
-            self._logger.error(f"Unable to search file, may ned to resync text.")
-            return None
-        _found_terms:dict[str,list[tuple]] = {}
-        for _lineid, _line in enumerate(self._modifiedLines):
-            for _term in terms:
-                if useRegExpess == True:
-                    _pattern = re.escape(_term)
-                    _found = [(m.start(0), m.end(0)) for m in re.finditer(_pattern, _line)]
-                    if len(_found) >= 1:
-                        if _term not in _found_terms.keys():
-                            _found_terms[_term] = []
-                        _found_terms[_term].append((_lineid, _found[0]))
-                else:
-                    _start_index = 0
-                    while True:
-                        _index = _line.find(_term, _start_index)
-                        if _index == -1:
-                            break
-                        if _term not in _found_terms.keys():
-                            _found_terms[_term] = []
-                        _found_terms[_term].append((_lineid, _index))
-                        _start_index = _index + len(_term)
-        for _t, _idList in _found_terms.items():
-            if _t not in self._searchTerm_ids.keys():
-                self._searchTerm_ids[_t] = _idList
-                continue
-            self._searchTerm_ids[_t].extend(_idList)
-        return _found_terms
+    def get_file_stats (self):
+        self._logger.debug(f"Number of Job Streams : [{len(self._stream_start_ids)}]")
+        self._logger.debug(f"Number of Jobs : [{len(self._job_start_ids)}]")
+        return self    
+ 
 
-
-    def get_foundSearchTerms (self) -> dict[str,list[tuple]]:
-        """Returns collection of found terms, the lines they are found on and the index on the line for each instance of the term found."""
-        return self._searchTerm_ids
-
-        
+    def get_JOBSTREAM_definition (self, filter:dict[str,any]=None) -> list[IWS_TEXT_obj] :
+        _holder_list = []
 
         
         
-    
+        return _holder_list
+
+
 
 #-------------------------------------------------
 #   IWS_ToolBox Class
 #-------------------------------------------------
 
 class IWS_ToolBox:
-    logger:OutputLogger
-    logStreamHandler:logging.StreamHandler = None
-    logFileHandler:logging.FileHandler = None
+    logger:OutputLogger = OutputLogger().get_instance()
     logFileName:str = None
-    targetWorkingDir:str = None
-    targetOutputDir:str = None
-
-    sourceFileFormats:list[str] = [fmt.value for fmt in ValidIWSFileFormat]
-    configFileFormats:list[str] = [fmt.value for fmt in ValidConfigFileFormat]
-
-    sourcePaths:list[str] = []
-    sourceFilePaths:list[Found_File_Path] = []
-    loadedConfigFiles:list[Loaded_Config_File] = []
-    loadedFileData:dict[str,Loaded_File_Data] = {}
-
-    # folder path and file terms to isolate or exclude from processing
-    excludeDirNames:list[str] = []
-    excludeFileNames:list[str] = []
-    excludeFileFormats:list[str] = []
-    includeDirNames:list[str] = []
-    includeFileNames:list[str] = []
-    includeFileFormats:list[str] = []
+    _targetWorkingDir:str = None
     
-    # File content search terms to isolate or exclude from processing
-    excludeTerms:list[str] = []
-    searchReplaceTerms:dict[str,str] = {}
-    searchTerms:list[str] = []
-
+    sourcePaths:list[str] = []
+    _steps:list[ToolBox_Step] = []
+    _fileData:list[ToolBox_loadedFileData] = []
 
     def __init__ (self, workingDirectoryPath:str=None, logFileName:str|None=None):
         if (workingDirectoryPath != None and os.path.exists(workingDirectoryPath) and os.path.isdir(workingDirectoryPath)):
@@ -448,195 +575,22 @@ class IWS_ToolBox:
             self.targetWorkingDir = os.path.dirname(os.path.abspath(__file__))
           
         self.logFileName = logFileName if (logFileName is not None) else f"log_{str(dt.now().date()).replace('-','')}.log"
-        self.logger = OutputLogger(self.targetWorkingDir, self.logFileName)
+        self._logger = OutputLogger.get_instance()
+        self._logger.init_logger(log_folder=self.targetWorkingDir, log_file=self.logFileName, level=logging.DEBUG)
 
 
-    def add_sourcePath (self, sourcePath:str) -> list[str]:
-        """Adds Directory or Folder path to source path list, used when collecting and filtering files."""
-        if os.path.exists(sourcePath) and os.path.isdir(sourcePath):
-            if sourcePath not in self.sourcePaths:
-                self.logger.debug(f"Added to sourcePath list : '{sourcePath}'")
-                self.sourcePaths.append(sourcePath)
-            else:
-                self.logger.debug(f"Skipping source Path '{sourcePath}' - alredy loaded or not a valid folder path.")
-        return self.sourcePaths
+    def add_step (self, step_name:str) -> ToolBox_Step :
+        _newStep = ToolBox_Step(step_name)
+        self._steps.append(_newStep)
+        self.logger.info(f"Added added step : '{_newStep.name}'")
+        return _newStep
 
 
-    def collectSourceFiles (self) -> list[dict[str,str]]:
-        """Gathers refferences to all files in each provided source path, filtering for file formats, directory paths, and file names"""
-        if len(self.sourcePaths) == 0 :
-            self.logger.warning("Unable to collect source files, no source paths have been loaded, use IWS_ToolBox.add_sourcePath() first to add a path")
-        _known_file_formats = set([fmt.lower() for fmt in self.sourceFileFormats])# + [e for e in self.configFileFormats])
-        self.logger.info(f"Valid File Formats", data=self.sourceFileFormats)
-        self.logger.info(f"Valid Config File Formats", data=self.configFileFormats)
-        if len(self.includeDirNames) >= 1 : self.logger.info(f"Including Directory Paths containeing terms : ", data=self.includeDirNames)
-        if len(self.includeFileNames) >= 1 : self.logger.info(f"Including File Names containing Terms : ", data=self.includeFileNames)
-        if len(self.excludeDirNames) >= 1 : self.logger.info(f"Exclude Directory Paths containing Terms : ", data=self.excludeDirNames)
-        if len(self.excludeFileNames) >= 1 : self.logger.info(f"Exclude Files Names containing Terms : ", data=self.excludeFileNames)
-        if len(self.excludeTerms) >= 1 : self.logger.info(f"Exclude Terms : ", data=self.excludeTerms)
+    def readFile (self, sourceFilePath:str) -> ToolBox_loadedFileData:
+        _fileData = ToolBox_loadedFileData(sourceFilePath)
         
-        _totalCounter = 0
-        _collectedCounter = 0
-        _relPaths = {}
-        for _path in self.sourcePaths:
-            if not(os.path.exists(_path)):
-                self.logger.warning(f"Unable to find path in sourcePaths List. target Path: '{_path}'")
-                continue
-            for dir_path, dirs, files in os.walk(_path):
-                for file in files:
-                    _totalCounter +=1
-                    _should_add:bool = True
-                    _excludeText = []
-                    _filePath = os.path.join(dir_path,file)
-                    if (len(self.includeDirNames) >= 1):
-                        for _dir in self.includeDirNames:
-                            if _dir.lower() not in dir_path.lower():
-                                _excludeText.append(f"Directory path does not contain any include terms: '{_dir}'")
-                                _should_add = False
-                    
-                    if (len(self.includeFileNames) >= 1):
-                        for _incdflnm in self.includeFileNames:
-                            if _incdflnm.lower() not in os.path.basename(dir_path).lower():
-                                _excludeText.append(f"Directory path does not contain any include terms: '{_incdflnm}'")
-                                _should_add = False
-                    
-                    #Checks if directory path contains excluded directory term
-                    for _excludeDir in self.excludeDirNames:
-                        if (_excludeDir.lower() in dir_path.lower()) or (_excludeDir.lower() == dir_path.lower()):
-                            _excludeText.append(f"File path contains excluded directory term : '{_excludeDir}'")
-                            _should_add = False
-                    #Checks if file foramt ends with and of the known formats.
-                    if not any([file.lower().endswith(fmt) for fmt in _known_file_formats]):
-                        _excludeText.append(f"File is not correct File Format : '*.{str(os.path.basename(file)).split('.')[-1]}'")
-                        _should_add = False
-                    
-                    #Checks is file should be added to data set:
-                    if (_should_add == False):
-                        _reasons = ', '.join([f'"{_sc+1}":"{_str}"' for _sc, _str in enumerate(_excludeText)])
-                        self.logger.debug(f"Excluding File from collection : '{_filePath}' | {_reasons}")
-                    else:
-                        self.logger.debug(f"Adding File to collection : '{_filePath}'")
-                        _new_file = Found_File_Path(_filePath, _path)
-                        if _new_file.relPath not in _relPaths.keys():
-                            _relPaths[_new_file.relPath] = []
-                        
-                        _relPaths[_new_file.relPath].append(file)
-                        self.sourceFilePaths.append(_new_file)
-                        _collectedCounter += 1
-        self.logger.info(f"Found [{_collectedCounter}] Files out of [{_totalCounter}] files.")
-        self.logger.info(f"from [{len(_relPaths)}] directories:",data = _relPaths)
-        return [_p.fullPath for _p in self.sourceFilePaths]
-
-    
-    def loadCollectedFiles(self, filePathList:list[str]=None):
-        """Loads each file in provided path list."""
-        if filePathList == None:
-            _pathlist = self.sourcePaths
-        else:
-            _pathlist = filePathList
-        self.logger.info(f"Loading [{len(filePathList)}] files in collection")
-        _loaded_counter = 0
-        for _fp in _pathlist:
-            _did_load = self.loadFile(_fp)
-            if (_did_load == True):
-                _loaded_counter += 1
-        self.logger.info(f"Loaded [{len(filePathList)}] files into memory")
-
-
-    def loadFile (self, sourcePath:str) -> bool:
-        """Loads provided file"""
-        def _find_sourcePath (targetPath:str) -> int:
-            for _idx, _pth in enumerate(self.sourceFilePaths):
-                if isinstance(_pth, Found_File_Path) and (targetPath.lower() == _pth.fullPath.lower()):
-                    return _idx
-            return -1
-        
-        if isinstance(sourcePath, str):
-            if not(os.path.exists(sourcePath)):
-                self.logger.error(f"Target source path does nto exists : ", sourcePath)
-                return False
-            _foramt = os.path.basename(sourcePath).split('.')[-1]
-            if not(os.path.isfile(sourcePath)) or (_foramt.lower() not in [_fmt.lower() for _fmt in self.sourceFileFormats]):
-                self.logger.error(f"Target source path is not a valid file : ", sourcePath)
-                return False
-        try:
-            _collected_id = _find_sourcePath(sourcePath)
-            if (_collected_id != -1):
-                _loaded_file = Loaded_File_Data(self.sourceFilePaths[_collected_id])
-            else:
-                _loaded_file = Loaded_File_Data(sourcePath)
-
-            if (_loaded_file is not None) and (isinstance(_loaded_file, Loaded_File_Data)):
-                self.loadedFileData[os.path.basename(_loaded_file.sourceFile)] = _loaded_file
-            return True
-        except PermissionError as err:
-            self.logger.error(f"Not enough permissions to load file from path: '{sourcePath}' - {err}")
-            return False
-        except FileExistsError as err:
-            self.logger.error(f"Unable to load file from path: '{sourcePath}' - {err}")
-            return False
-    
-
-    def files_by_terms (self, searchTermList:list[str]=None) -> dict[str,list[str]]:
-        """Returns a collection of found terms ans the file that contain them"""
-        _searchList = searchTermList if isinstance(searchTermList, list) else self.searchTerms
-        if (len(_searchList) == 0) or (_searchList is None):
-            self.logger.warning(f"No search terms provided or found in toolbox.")
-            return None
-        _foundterms = {}
-        for _file, _data in self.loadedFileData.items():
-            _found = _data.search(_searchList)
-            if len(_found.keys()) != 0:
-                for _k in _found.keys():
-                    if _k not in _foundterms.keys():
-                        _foundterms[_k] = []
-                    _foundterms[_k].append(_file)
-        if len(_foundterms.keys()) >=1 :
-            _counts = {}
-            for _k, _v in _foundterms.items():
-                if _k not in _counts.keys():
-                        _counts[_k] = (len(_v), _v)
-            _sum = sum([_v[1][0] for _v in _counts.items()])
-            self.logger.info(f"Found [{_sum}] results when searching for [{len(_foundterms.keys())}] terms : ", data=_counts)
-        return _foundterms
-    
-#-------------------------------------------------
-#   Initialize Script
-#-------------------------------------------------
-
-if __name__ == "__main__":
-    # Capture current date and time when script begins
-    _startTime = dt.now()
-
-    _outputPath = "C:\\Users\\jlemaster3\\OneDrive - Gainwell Technologies\\Documents\\_Ticket_Repo\\IDXIX_sitALT_to_uatALT"
-
-    # Create new instance of the IWS_ToolBox class
-    toolbox = IWS_ToolBox(workingDirectoryPath=_outputPath)
-    toolbox.logger.info(f"Process started at : {_startTime}")
-    # Add a source paths to the the toolbox.
-    toolbox.add_sourcePath("C:\\VS_Code_Repo\\IDXIX\\")
-    # Sets trems to search for and use to exclude a file form processing if found in the file's full filepath
-    toolbox.excludeDirNames = ["ObsoleteJobs"]
-    toolbox.excludeFileNames = []
-    toolbox.excludeFileFormats = []
-    # Sets trems to search for and use to isolate and process only files found in this file's full filepath
-    toolbox.includeDirNames = ["Jobs"]
-    toolbox.includeFileNames = []
-    toolbox.includeFileFormats = []
-
-    # Initials the Toolbox's file colelction process, gathering refrences to all files in each provided source path.
-    colelctedFileList = toolbox.collectSourceFiles()
-
-    # Load and Filter Colelcted Source Files
-    toolbox.excludeTerms = []
-    toolbox.searchReplaceTerms = {}
-    toolbox.searchTerms = []
-
-    toolbox.loadCollectedFiles(colelctedFileList) 
-    
-    toolbox.files_by_terms()
-
-    # Capture current date and time when script ends
-    _stopTime = dt.now()
-    toolbox.logger.info(f"Process completed at :  at {_stopTime} elapsed time {format(_stopTime-_startTime)}")
-    
+        if _fileData != None :
+            self._fileData.append(_fileData)
+            self.logger.info(f"Loaded Data from File: '{os.path.basename(sourceFilePath)}'")
+            return _fileData
+            
