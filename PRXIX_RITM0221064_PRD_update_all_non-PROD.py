@@ -40,6 +40,7 @@ working_directory = os.path.join ("C:\\Users\\jlemaster3\\OneDrive - Gainwell Te
 
 def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputUsingRelPaths:bool=True, compareFolders:list[str]=None, streamNameGroups:dict[str, list[str]] = None, quite_logging=True):
     """Collect files by sub-directory comapred to source path for comparisons."""
+    log.critical (f"Starting Step 1")
     if (not os.path.isdir(sourcePath)):
         log.error (f"Target source path is not a valid Directory Path : '{sourcePath}'")
         return
@@ -66,25 +67,27 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
     
     if (compareFolders != None):
         # take action based off criteria used for comapareFolders list if found.
-        # this area is custom and needs to be factored in a better way.
-        _PROD_key_list:list[str] = [key for key in _collected_lists.keys() if 'PROD' in key]
-        _UAT_key_list:list[str] = [key for key in _collected_lists.keys() if 'UAT' in key]
-        _MOD_key_list:list[str] = [key for key in _collected_lists.keys()  if 'MOD' in key]
-        _TEST_key_list:list[str] = [key for key in _collected_lists.keys()  if 'TEST' in key]
-        _common_prefix = os.path.commonprefix(_PROD_key_list)
+        # this area is custom and needs to be factored in a better way.        
         
-        
-        def _file_action (_file:ToolBox_FileData, targetOutput:str):
+        def file_action (_file:ToolBox_FileData, targetOutput:str):
             #global actions to apply to all files before saving
-            if _file.sourceFileBaseName.lower() in streamNameGroups['set_onRequest_true']:
-                _file.openFile()
-                _file.set_Streams_onRequest()
+            _file.openFile()
+            for _check_name in streamNameGroups["set_ONREQUEST_true"]:
+                if _check_name.lower() in _file.sourceFileBaseName.lower():
+                    log.debug(f"File '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}' was found in list to  'set_ONREQUEST_true'.")
+                    _file.set_Streams_ONREQUEST(True, remove_RUNCYCLE_lines=True)
+                    _file.set_Streams_DRAFT(False)
+                    _file.set_Jobs_NOP(False)                    
+
             os.makedirs(targetOutput, exist_ok=True)
             _outputFilePath = os.path.join (targetOutput, _file.sourceFileName)
+            # save file to output location.
             _file.saveTo(targetOutput)
-            if (quite_logging != True) : log.debug (f"Saving file from '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}' to location '{_outputFilePath}'")   
+            log.info (f"Saving file from '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}' to location '{_outputFilePath}'")   
 
-        def _process_paths (path_A:str, list_A:list[str], path_B:str):
+
+        def process_paths (path_A:str, list_A:list[str], path_B:str):
+            """handles each set of paths to comapir aginst each other"""
             list_B = [_fn for _fn in _collected_lists[path_B].keys()]
             _set_A = set(list_A)
             _set_B = set(list_B)
@@ -97,49 +100,58 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
             }
             if (quite_logging != True) : log.debug (f"Comapring folders '{_prdPath}' with '{path_B}'", data=_results)
 
-            _curr_path_file_created = 0
+            _curr_path_created_count = 0
             _outputPath = os.path.join (outputputRootPath, path_B)
             os.makedirs(_outputPath, exist_ok=True)
             for _fileName in _results["List_A_Only"]:
                 _fileData = _collected_lists[path_A][_fileName]
-                _curr_path_file_created += 1 
-                # if file is copied form PROD set add ONRESQUES if not already set.
+                _curr_path_created_count += 1 
                 _fileData.openFile()
-                _fileData.set_Streams_onRequest()
-                _file_action(_fileData, _outputPath)
+                log.debug(f"File '{path_A}/{_fileName}' not found in target Directory : '{path_B}'.")
+                _fileData.set_Streams_ONREQUEST(True, remove_RUNCYCLE_lines=False)
+                file_action(_fileData, _outputPath)
                                 
             for _fileName in _results["List_B_Only"]:
                 _fileData = _collected_lists[path_B][_fileName]
                 _fileData.openFile()
-                _curr_path_file_created += 1 
-                #_file_action(_fileData, _outputPath)
+                _curr_path_created_count += 1 
+                file_action(_fileData, _outputPath)
 
             for _fileName in _results["MATCHING"]:
                 _fileData = _collected_lists[path_B][_fileName]
-                _curr_path_file_created += 1 
-                #_file_action(_fileData, _outputPath)
+                _curr_path_created_count += 1 
+                file_action(_fileData, _outputPath)
 
-            log.info (f"Creted a total of [{_curr_path_file_created}] in '{_outputPath}'")
+            log.info (f"Creted a total of [{_curr_path_created_count}] in '{_outputPath}'")
             
-            return _curr_path_file_created
+            return _curr_path_created_count
             
+
+        _PROD_key_list:list[str] = [key for key in _collected_lists.keys() if 'PROD' in key]
+        _UAT_key_list:list[str] = [key for key in _collected_lists.keys() if 'UAT' in key]
+        _MOD_key_list:list[str] = [key for key in _collected_lists.keys()  if 'MOD' in key]
+        _TEST_key_list:list[str] = [key for key in _collected_lists.keys()  if 'TEST' in key]
 
         merged_paths = list(set(_UAT_key_list + _MOD_key_list + _TEST_key_list))
-        
+        _common_prefix = os.path.commonprefix(_PROD_key_list)
         _total_files_created = 0
         _total_dir_counter = 0
+        _common_prefix = os.path.commonprefix(_PROD_key_list)
+        
         for _prdPath in _PROD_key_list:
             _prdfileNames = [_fn for _fn in _collected_lists[_prdPath].keys()]
             _prd_subPath = _prdPath.removeprefix(_common_prefix)
             for _target_subPath in [_path for _path in merged_paths if _prd_subPath in _path]:
-                _createdCount = _process_paths (_prdPath, _prdfileNames, _target_subPath)
+                _createdCount = process_paths (_prdPath, _prdfileNames, _target_subPath)
                 _total_dir_counter += 1
                 _total_files_created += _createdCount
 
         log.info (f"Creted a total of [{_total_files_created}] files into [{_total_dir_counter}] sub directories")
     else:
         # do same actions to all files found in collection.
-        print ('comapring paths')
+        pass
+    
+    log.critical (f"Completed Step 1")
 
 
 
@@ -150,8 +162,53 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
 if __name__ == "__main__":
 
     # Capture current date and time when script begins
-    log.init_logger(log_folder=working_directory, log_file=f"_{dt.now().strftime('%Y%m%d')}.log")
-    log.info(f"Starting log for ticket : {ticketNumber} under contract : {contract}")
+    log.init_logger(log_folder=working_directory, log_file=f"{contract}_{ticketNumber}_{dt.now().strftime('%Y%m%d')}.log")
+    log.critical(f"Starting log for ticket : {ticketNumber} under contract : {contract}")
+
+    log.critical(f"", data = {
+        "requirment 1" : 'All job stream/runbooks listed below in non-prod environments should have the frequency set to "ON REQUEST". ',
+        "requirment 2" : 'For all non-prod environment jobs under the listed below listed job stream/runbooks\n    - Job stream Draft should be set to “FALSE”.\n    - Jobs Operation (NOP) should be set to “FALSE”.',
+        "Job Stream List": [
+            "PD5MGD_834INB",
+            "PD5MGD_834RSTRMV",
+            "PD5MGD_834RSTR_A",
+            "PD5MGD_834RSTR_B",
+            "PD5MGD_834RSTR_C",
+            "PD5MGD_ASGNRPT",
+            "PD5MGD_RATECELL",
+            "PMMGD_820_RLS",
+            "PMMGD_834RPTS",
+            "PMMGD_834RSTR",
+            "PMMGD_CAP_820",
+            "PMMGD_CAP_ADJCYC",
+            "PMMGD_CAP_CYC_MN",
+            "PMMGD_CAP_FCST",
+            "PMMGD_CAP_OTP",
+            "PMMGD_CAP_RPT",
+            "PMMGD_CMS64",
+            "PMMGD_RATECELL",
+            "PMMGD_SUBCAP"
+        ], 
+        "requirment 3" : 'Some jobs are missing in non-prod environments compared to the PROD. To add the missing jobs along with their respective Predecessors to ensure Synchronization with PROD.',
+        "requirment 4" : 'Some job streams are also missing in non-prod environment workstation. These should be created with frequency set to “ON REQUEST”',
+        "requirment 5" : 'No changes are required for job streams or jobs that exists in non-prod environment but not in PROD.',
+        "PROD Workstation" : {
+            "/PRXIX/MIS/PROD/" : "/PRXIX/PRPRODLBATCH001"
+        },
+        "Non-PROD Workstations" : {
+            "/PRXIX/MIS/TEST/" : "/PRXIX/PRTSTLBATCH001",
+            "/PRXIX/MIS/TESTA/" : "/PRXIX/PRTSTLBATCH001",
+            "/PRXIX/MIS/TESTB/" : "/PRXIX/PRTSTLBATCH001",
+            "/PRXIX/MIS/TESTB/" : "/PRXIX/PRTSTLBATCH002",
+            "/PRXIX/MIS/MOD/" : "/PRXIX/PRMODLBATCH001",
+            "/PRXIX/MIS/MODA/" : "/PRXIX/PRMODLBATCH001",
+            "/PRXIX/MIS/MODB/" : "/PRXIX/PRMODLBATCH001",
+            "/PRXIX/MIS/MODB/" : "/PRXIX/PRTSTLBATCH002",
+            "/PRXIX/MIS/UAT/" : "/PRXIX/PRUATLBATCH001",
+            "/PRXIX/MIS/UATB/" : "/PRXIX/PRUATLBATCH001"
+        },
+        "Added Requirment 6" : "If a Job Stream or Job is found in PROD that does not exist in either MODB or TESTB and is set to use '@BAT1' as the workstation, Duplicate the '@BAT1' Jobs and Jobs Streams and point the duplciate to '@BAT2' within the same *.jil File."
+    })
 
     step_1 (
         sourcePath = source_path,
@@ -165,28 +222,27 @@ if __name__ == "__main__":
             "UAT", "UATA", "UATB"
         ],
         streamNameGroups = {
-            "set_onRequest_true" : [
-                "{E}D5MGD_834INB",
-                "{E}D5MGD_834RSTRMV",
-                "{E}D5MGD_834RSTR_A",
-                "{E}D5MGD_834RSTR_B",
-                "{E}D5MGD_834RSTR_C",
-                "{E}D5MGD_ASGNRPT",
-                "{E}D5MGD_RATECELL",
-                "{E}MMGD_820_RLS",
-                "{E}MMGD_834RPTS",
-                "{E}MMGD_834RSTR",
-                "{E}MMGD_CAP_820",
-                "{E}MMGD_CAP_ADJCYC",
-                "{E}MMGD_CAP_CYC_MN",
-                "{E}MMGD_CAP_FCST",
-                "{E}MMGD_CAP_OTP",
-                "{E}MMGD_CAP_RPT",
-                "{E}MMGD_CMS64",
-                "{E}MMGD_RATECELL",
-                "{E}MMGD_SUBCAP"
+            "set_ONREQUEST_true" : [
+                "D5MGD_834INB",
+                "D5MGD_834RSTRMV",
+                "D5MGD_834RSTR_A",
+                "D5MGD_834RSTR_B",
+                "D5MGD_834RSTR_C",
+                "D5MGD_ASGNRPT",
+                "D5MGD_RATECELL",
+                "MMGD_820_RLS",
+                "MMGD_834RPTS",
+                "MMGD_834RSTR",
+                "MMGD_CAP_820",
+                "MMGD_CAP_ADJCYC",
+                "MMGD_CAP_CYC_MN",
+                "MMGD_CAP_FCST",
+                "MMGD_CAP_OTP",
+                "MMGD_CAP_RPT",
+                "MMGD_CMS64",
+                "MMGD_RATECELL",
+                "MMGD_SUBCAP"
             ]
         }
     )
-
-    print (f"done")
+    log.critical(f"Ending log for ticket : {ticketNumber} under contract : {contract} - Processing Complete.")
