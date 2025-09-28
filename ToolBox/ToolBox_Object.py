@@ -1,7 +1,7 @@
 #-------------------------------------------------
 #   Imports
 #-------------------------------------------------
-import os, shutil, copy, uuid
+import os, re, copy, uuid
 from collections import UserDict
 from typing import Any
 from ToolBox.ToolBox_logger import OutputLogger
@@ -66,13 +66,24 @@ class ToolBox_FileData (UserDict):
             if (_holder != None):
                 #clean lines and remove retuirns and next line charecters
                 self._rawLines = [s.replace('\n', '').replace('\r', '') for s in _holder]
-        self.reset_mod_lines()
-        self.update_mod_lineIDs()
+            self.reset_mod_lines()
+            self.update_mod_lineIDs()
         return self
+
+    @ToolBox_Decorator
+    def closeFile (self):
+        del self._rawLines
+        self._rawLines = []
+        del self._modLines
+        self._modLines = []
+        del self._idCollections
+        self._idCollections = {}
+        self.init_default_collections()
 
     @ToolBox_Decorator
     def reset_mod_lines (self) :
         self._modLines = copy.deepcopy(self._rawLines)
+        self.update_mod_lineIDs()
         return self
 
     @ToolBox_Decorator
@@ -123,7 +134,8 @@ class ToolBox_FileData (UserDict):
             '_TASKTYPE_ids',
             '_OUTPUTCOND_ids',
             '_RECOVERY_ids',
-            '_NOP_ids'
+            '_NOP_ids',
+            '_NEEDS_ids'
         ]
         for _name in default_collection_list:
             self.reset_collection_by_name(_name, auto_Create=True)
@@ -142,7 +154,7 @@ class ToolBox_FileData (UserDict):
                 self._idCollections['_REQUEST_ids'].append(_line_id)
             if ':' in _line[0:2]:
                 self._idCollections['_STREAM_EDGE_ids'].append(_line_id)
-            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) or (any(_s in str(_line).strip()[0:5] for _s in ['PRD#', 'NPR#'])) and ('#' in str(_line[2:]).strip()):
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :#or (any(_s in str(_line).strip()[0:5] for _s in ['PRD#', 'NPR#'])) and ('#' in str(_line[2:]).strip()):
                 self._idCollections['_JOB_START_ids'].append(_line_id)
             if 'DESCRIPTION' in _line:
                 self._idCollections['_DESCRIPTION_ids'].append(_line_id)
@@ -164,6 +176,8 @@ class ToolBox_FileData (UserDict):
                 self._idCollections['_RECOVERY_ids'].append(_line_id)
             if 'NOP' in _line:
                 self._idCollections['_NOP_ids'].append(_line_id)   
+            if 'NEEDS' in _line[0:8]:
+                self._idCollections['_NEEDS_ids'].append(_line_id)
             if "END" in str(_line).strip()[0:4] and 'ENDJOIN' not in str(_line).strip():
                 self._idCollections['_STREAM_END_ids'].append(_line_id)
         return self
@@ -187,12 +201,15 @@ class ToolBox_FileData (UserDict):
     @property
     def has_changed (self) -> bool:
         """Returns a true falce value if the modified value is diffrent from the orriginal contents of the files when opened."""
-        if len(self._rawLines >= 1) and (len(self._rawLines) == len(self._modLines)):
+        is_same = True
+        if (len(self._rawLines) != len(self._modLines)):
+            is_same = False
+        else:
             for _i in range(len(self._rawLines)):
-               if (self._rawLines[_i] != self._modLines[_i]) :
-                   return False
-            return True
-        return False
+                if self._rawLines[_i] != self._modLines[_i]:
+                    is_same = False
+                    break
+        return is_same
 
     @property
     def sourceFilePath(self) -> str:
@@ -240,7 +257,7 @@ class ToolBox_FileData (UserDict):
     @ToolBox_Decorator
     def search_for_terms (self, searchTerms:list[str]) -> dict[int, list[str]] :
         _found_lineID_terms:dict[int, list[str]] = {}
-        for _line_id, _line in enumerate(self._rawLines):
+        for _line_id, _line in enumerate(self._modLines):
             for _term in searchTerms:
                 if _term.lower() in _line.lower():
                     if _line_id not in _found_lineID_terms.keys():
@@ -251,11 +268,25 @@ class ToolBox_FileData (UserDict):
         else:
             return _found_lineID_terms
         
+    @ToolBox_Decorator
+    def search_replace_terms (self, searchReplaceTerms:dict[str,str]) -> bool:
+        """Searches for a substring and replaces it with a given substring in file.  Returns True of change was made, false if no change was made."""    
+        _changed = False
+        for _line_id, _line in enumerate(self._modLines):
+            for _search, _replace in searchReplaceTerms.items():
+                if _search.lower() in _line.lower():
+                    _newline, _changes = re.subn(_search, _replace, _line, flags=re.IGNORECASE)
+                    if _changes >= 1:
+                        _changed = True
+                        self._modLines[_line_id] = _newline
+                        self._logger.debug (f"Found term '{_search}' and reaplced with '{_replace}' on line [{_line_id}] in file '{os.path.join(self.sourceFileDirRelPath, self.sourceFileName)}'")
+        
+        return _changed
     
     @ToolBox_Decorator
     def saveTo (self, outputfolder:str, rename:str=None, useRelPath:bool=False) -> str:
         #needs to be reworked, not saving some files in the correct path.
-        _outputPath = outputfolder if useRelPath == False else os.path.join(outputfolder,self._relPath)
+        _outputPath = os.path.join(outputfolder,self._relPath) if useRelPath == False else outputfolder
         os.makedirs(_outputPath, exist_ok=True)
         _filename = rename if rename != None else self._fileName
         _outputFilePath = os.path.join (_outputPath, _filename)
@@ -274,7 +305,7 @@ class ToolBox_FileData (UserDict):
             self._modLines.insert(int(_insert_id), _line)
         self.update_mod_lineIDs()
 
-
+    @ToolBox_Decorator
     def remove_Line_at (self, index:int, count:int):
         if len(self._modLines) >= (index + count):
             del self._modLines[index: index + count]
@@ -408,10 +439,10 @@ class ToolBox_FileData (UserDict):
     def set_Jobs_NOP (self, value:bool=True, filter_worksataiton:list[str]=None, filter_folder:list[str]=None, filer_streamName:list[str]=None, filter_jobNames:list[str]=None):
         for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
             _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
-            _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]
+            _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]+1
             _skip:bool = False
             _job_ids = [_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start < _id < _stream_end]
-            _lines_toRemove:list[list[int]] = []
+            _lines_toRemove:dict[str,list[int]] = {}
             for _i in range(len([_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start < _id < _stream_end])):
                 _job_line_start = _job_ids[_i]
                 _job_line_stop = int(_job_ids[_i+1])-1 if _i < (len(_job_ids)-1) else int(_stream_end -1)
@@ -451,9 +482,158 @@ class ToolBox_FileData (UserDict):
                     self._logger.debug (f"Added 'NOP' to job : '{_target_name}'")
                 elif (_has_nop == True) and (value == False):    
                     _nop_ids = [_nop_idx for _nop_idx in self._idCollections['_NOP_ids'] if _job_line_start < _nop_idx < _job_line_stop]
-                    self._logger.debug (f"Removed 'NOP' from job : '{_target_name}'")
-                    _lines_toRemove.append(_nop_ids)
-            for _linelist in _lines_toRemove.reverse():
-                self.remove_Line_at(min(_linelist),len(_linelist))
-                
+                    _lines_toRemove[_target_name] = _nop_ids
+
+            if len(_lines_toRemove.keys()) >= 1:
+                _remove_target_order = sorted(_lines_toRemove.keys(), key=lambda k: _lines_toRemove[k][0], reverse=True)
+                for _targetName in _remove_target_order:
+                    self.remove_Line_at(min(_lines_toRemove[_targetName]),len(_lines_toRemove[_targetName]))
+                    self._logger.debug (f"Removed 'NOP' from job : '{_targetName}'")
         return self
+    
+    @ToolBox_Decorator
+    def copy_Streams_By_Workstation (self, sourceWorkstation:str, targetWorkstation:str) -> bool:
+        self.update_mod_lineIDs()
+        _found_source_items : list[dict[str,int|str]] = []
+        _found_target_items : list[dict[str,int|str]] = []
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
+            _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]+1
+            if (sourceWorkstation.upper() in self._modLines[_stream_start].upper()):
+                _found_source = {
+                    "start" : _stream_start,
+                    "stop" : _stream_end,
+                    "name" : self._modLines[_stream_start].split(' ')[1]
+                }
+                if _found_source not in _found_source_items:
+                    _found_source_items.append(_found_source)
+            if (targetWorkstation.upper() in self._modLines[_stream_start].upper()):
+                _found_target = {
+                    "start" : _stream_start,
+                    "stop" : _stream_end,
+                    "name" : self._modLines[_stream_start].split(' ')[1]
+                }
+                if _found_target not in _found_target_items:
+                    _found_target_items.append(_found_target)
+        _has_changed = False
+        for _found_item in _found_source_items:
+            _source_stream_name = str(_found_item['name']).strip().split('/')[-1]
+            _already_exists = False
+            for _target_item in _found_target_items:
+                _target_stream_name = str(_target_item['name'])
+                if (targetWorkstation.upper() in _target_stream_name) and (_source_stream_name.upper() in _target_stream_name):
+                    _already_exists = True
+            if _already_exists == True:
+                continue
+            self._logger.debug(f"Duplicating Stream '{_found_item['name']}' replacing all Workstation references '{sourceWorkstation}' with: '{targetWorkstation}'")  
+            _duplicate_lines = copy.deepcopy(self._modLines[_found_item['start']:_found_item['stop']])
+            for _i in range(len(_duplicate_lines)):
+                _duplicate_lines[_i] = _duplicate_lines[_i].replace(sourceWorkstation, targetWorkstation)
+            _duplicate_lines.insert(0,'')
+            self._modLines.extend(_duplicate_lines)
+            _has_changed = True
+        self.update_mod_lineIDs()
+        return _has_changed
+    
+    @ToolBox_Decorator
+    def get_NEEDS_reference (self) ->list[str]:
+        """Returns the list of named NEEDS resources found in file."""
+        self.update_mod_lineIDs()
+        _found_needs:list[str] = []
+        for _i in range(len(self._idCollections['_NEEDS_ids'])):
+            _needs_line = self._modLines[self._idCollections['_NEEDS_ids'][_i]]
+            _needs_name = _needs_line.split(' ')[2].split('/')[-1]
+            if (_needs_name not in _found_needs):
+                _found_needs.append(_needs_name)
+        return _found_needs
+    
+    @ToolBox_Decorator
+    def get_RCG_reference (self) ->list[str]:
+        """Returns the list of named RCG resources found in file."""
+        self.update_mod_lineIDs()
+        _found_needs:list[str] = []
+        for _i in range(len(self._idCollections['_RUNCYCLE_ids'])):
+            _line = self._modLines[self._idCollections['_RUNCYCLE_ids'][_i]]
+            _parts = _line.split(' ')
+            for _idx, elem in enumerate(_parts):
+                if ('$RCG' in elem) and (_idx + 1 < len(_parts)):
+                    _rcgName = _parts[_idx+1].split('/')[-1]
+                    if _rcgName not in _found_needs:
+                        _found_needs.append(_rcgName)
+        return _found_needs
+    
+    @ToolBox_Decorator
+    def get_Stream_names (self) -> list[str] :
+        self.update_mod_lineIDs()
+        _names = []
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
+            _streamName = str(self._modLines[_stream_start].split(' ')[1])
+            if _streamName not in _names:
+                _names.append(_streamName)
+        return _names
+    
+    @ToolBox_Decorator
+    def get_Job_names (self) -> list[str] :
+        self.update_mod_lineIDs()
+        _names = []
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
+            _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]+1
+            _streamName = str(self._modLines[_stream_start].split(' ')[1])
+            _job_ids = [_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start< _id < _stream_end]
+            for _job_id in _job_ids:
+                _job_line = self._modLines[_job_id].split('/')[-1]
+                _fullName = f"{_streamName}.{_job_line}"
+                if _fullName not in _names:
+                    _names.append(_fullName)
+        return _names
+
+    @ToolBox_Decorator
+    def get_StreamText (self, streamName:str) -> str:
+        """Returns the string value of the trarget Stream name in this file"""
+        _holder_string = ''
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
+            _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]+1
+            if (streamName.upper() in self._modLines[_stream_id].upper()):
+                _holder_string += '\n'.join(self._modLines[_stream_start:_stream_end])
+                _holder_string += '\n'
+        return _holder_string
+    
+    @ToolBox_Decorator
+    def get_JobText (self, streamName:str, jobName:str) -> str:
+        """Returns the string value of the trarget Stream name in this file"""
+        _holder_string = ''
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            if (streamName.upper() in self._modLines[_stream_id].upper()):
+                _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
+                _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]+1
+                _job_ids = [_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start < _id < _stream_end]
+                for _i in range(len([_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start < _id < _stream_end])):
+                    _job_line_start = _job_ids[_i]
+                    _job_line_stop = int(_job_ids[_i+1])-1 if _i < (len(_job_ids)-1) else int(_stream_end -1)
+                    if (jobName.upper() in self._modLines[_job_line_start].upper()):
+                        _holder_string += '\n'
+                        _holder_string += '\n'.join(self._modLines[_job_line_start:_job_line_stop])
+        return _holder_string
+
+    @ToolBox_Decorator
+    def add_streamText_to_File (self, text:str) :
+        """Add Stream to end of file."""
+        _textLines = text.split('\n')
+        _textLines.insert(0,'')
+        self.openFile()
+        self._modLines.extend(_textLines)
+        self.update_mod_lineIDs()
+
+    @ToolBox_Decorator
+    def add_Job_to_Stream (self, streamName:str, jobText:str):
+        """Add Job to end of target Stream in file."""
+        self.openFile()
+        _textLines = jobText.split('\n')
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            if (streamName.upper() in self._modLines[_stream_id].upper()):
+                _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]
+                self._modLines[_stream_end:_stream_end] = _textLines
+        self.update_mod_lineIDs()
