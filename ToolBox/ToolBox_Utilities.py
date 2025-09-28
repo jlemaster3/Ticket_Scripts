@@ -1,7 +1,7 @@
 #-------------------------------------------------
 #   Imports
 #-------------------------------------------------
-import os, shutil, copy
+import os, re, shutil, copy
 from typing import Any
 from ToolBox.ToolBox_logger import OutputLogger
 from ToolBox.ToolBox_Object import ToolBox_FileData
@@ -136,3 +136,50 @@ def clean_relPath_List (path_list:list[str]) -> str:
     _common_prefix = os.path.commonprefix(path_list)
     _result_paths = [path.removeprefix(_common_prefix) for path in path_list]
     return _result_paths
+
+
+def compare_FileData_text_matching (file_A:ToolBox_FileData, file_B:ToolBox_FileData) -> bool:
+    """Compares two diffrent TollBox_FileData modified text content and returns if they are teh same or not, ignoring whitespace."""
+    file_A.openFile()
+    file_B.openFile()
+    _text_A = re.sub(r'\s+','',file_A.text_modified)
+    _text_B = re.sub(r'\s+','',file_B.text_modified)
+    return _text_A.lower() == _text_B.lower()
+
+
+def merge_Streams_and_Jobs_A_to_B(file_A:ToolBox_FileData, file_B:ToolBox_FileData) -> bool:
+    """Merge Streams and Jobs found in File A into File B if they do not exist in File B."""
+    log = OutputLogger.get_instance()
+    file_A.openFile()
+    file_B.openFile()
+
+    _file_A_streams = set(file_A.get_Stream_names())
+    _file_B_streams = set(file_B.get_Stream_names())
+    _A_only_Streams = _file_A_streams - _file_B_streams
+
+    _file_A_jobs = set(file_A.get_Job_names())
+    _file_B_jobs = set(file_B.get_Job_names())
+    _A_only_Jobs = _file_A_jobs - _file_B_jobs
+
+
+    _applied_changes = False
+
+    if len(_A_only_Streams) >= 1:
+        #Merge whoel Stream
+        for _streamName in _A_only_Streams:
+            log.debug (f"Stream '{_streamName}' found in '{os.path.join(file_A.sourceFileDirRelPath, file_A.sourceFileName)}' not found in '{os.path.join(file_B.sourceFileDirRelPath, file_B.sourceFileName)}'")
+            _stream_text_A = file_A.get_StreamText(_streamName)
+            file_B.add_streamText_to_File(_stream_text_A)
+            _applied_changes = True
+        
+    if len(_A_only_Jobs) >= 1:
+        #merge job in targeted streams
+        for _jobName in _A_only_Jobs:
+            log.debug (f"Job '{_jobName}' found in '{os.path.join(file_A.sourceFileDirRelPath, file_A.sourceFileName)}' not found in '{os.path.join(file_B.sourceFileDirRelPath, file_B.sourceFileName)}'")
+            _stream = _jobName.split('.')[0]
+            _job = _jobName.split('.')[1]
+            _job_text = file_A.get_JobText(_stream, _job)
+            file_B.add_Job_to_Stream (_stream, _job_text)
+            _applied_changes = True
+
+    return _applied_changes
