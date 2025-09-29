@@ -20,9 +20,15 @@ for TEST, TESTA, TESTB, MOD, MODA, MODB, UAT, UATB
 #-------------------------------------------------
 #   Imports
 #-------------------------------------------------
-import os
-from ..ToolBox import *
+import os, sys
 from datetime import datetime as dt
+
+## Imports ToolBox, and log
+_curr_dir = os.path.dirname(os.path.abspath(__file__))
+_prnt_dir = os.path.dirname(_curr_dir)
+sys.path.append(_prnt_dir)
+from ToolBox import *
+
 #-------------------------------------------------
 #   Variables
 #-------------------------------------------------
@@ -38,7 +44,71 @@ working_directory = os.path.join ("C:\\Users\\jlemaster3\\OneDrive - Gainwell Te
 #   Steps
 #-------------------------------------------------
 _saved_file_count = 0
+
 def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputUsingRelPaths:bool=True, compareFolders:list[str]=None, streamNameGroups:dict[str, list[str]] = None, quite_logging=True):
+    """Collect files by sub-directory comapred to source path for comparisons."""
+    log.critical (f"Starting Step 1")
+    if (not os.path.isdir(sourcePath)):
+        log.error (f"Target source path is not a valid Directory Path : '{sourcePath}'")
+        return
+    if (not os.path.exists(sourcePath)):
+        log.error (f"Target source path does not exists : '{sourcePath}'")
+        return
+    
+    if (not os.path.isdir(workingDirectory)):
+        log.error (f"Target Working Directory is not a valid directory path : '{workingDirectory}'")
+        return
+    os.makedirs(workingDirectory, exist_ok=True)
+    if (outputputRootPath == None):
+        # if output directory is note provided use working directory
+        outputputRootPath = working_directory
+    log.info (f"Gathering IWS *.jil and *.job files from source : '{sourcePath}'")
+    _FileList = gather_files(sourcePath, quite_logging=quite_logging)
+    _collected_lists:dict[str,dict[str,ToolBox_FileData]] = {}
+    for _file in _FileList.values():
+        if (compareFolders != None) and (len(compareFolders) >= 1):
+            if any(_cp.upper() in _file.sourceFileDirRelPath.upper() for _cp in compareFolders):
+                if _file.sourceFileDirRelPath not in _collected_lists.keys():
+                    _collected_lists[_file.sourceFileDirRelPath] = {}
+                _collected_lists[_file.sourceFileDirRelPath][_file.sourceFileName] = _file
+
+    _PROD_key_list:list[str] = [key for key in _collected_lists.keys() if 'PROD' in key]
+    _UAT_key_list:list[str] = [key for key in _collected_lists.keys() if 'UAT' in key]
+    _MOD_key_list:list[str] = [key for key in _collected_lists.keys()  if 'MOD' in key]
+    _TEST_key_list:list[str] = [key for key in _collected_lists.keys()  if 'TEST' in key]
+    _merged_paths = list(set(_UAT_key_list + _MOD_key_list + _TEST_key_list))
+    _common_prefix = os.path.commonprefix(_PROD_key_list)
+    for _prd_relativePath in _PROD_key_list:
+        for _prd_file in _collected_lists[_prd_relativePath].values():
+            _target_relPaths =  [_path for _path in _merged_paths if _prd_relativePath.removeprefix(_common_prefix) in _path]
+            _found_files = [_f for _p in _merged_paths for _f in _collected_lists[_p].values() if _prd_file.sourceFileBaseName[1:].upper() in _f.sourceFileName.upper()]
+            _found_relPaths = [_f.sourceFileDirRelPath for _f in _found_files]
+            _relPaths_missing_file = list(set(_target_relPaths) - set(_found_relPaths))
+
+            for _file in _found_files:
+                # check and udpate file
+                log.info (f"Found copy of file : '{os.path.join(_prd_relativePath, _prd_file.sourceFileName)}' in path : '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}', checking file.")
+                
+                _applied_a_change = merge_Streams_and_Jobs_A_to_B (_prd_file, _file)
+
+                for _check_name in streamNameGroups["set_ONREQUEST_true"]:
+                    if _check_name.lower() in _file.sourceFileName.lower():
+                        log.debug(f"File '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}' was found in list to  'set_ONREQUEST_true'.")
+                        _file.set_Streams_ONREQUEST(True, remove_RUNCYCLE_lines=True)
+                        _file.set_Streams_DRAFT(False)
+                        _file.set_Jobs_NOP(False)
+
+                for _env in ['MODB', 'TESTB']:
+                    if _env.upper() in _file.sourceFileDirRelPath.upper():
+                        # check if '@BAT2#' workstation exists, copy '@Bat1' if not found.
+                        _file.copy_Streams_By_Workstation ("@BAT1#", "@BAT2#")
+
+            for _missingPath in  _relPaths_missing_file:
+                log.info (f"File : '{os.path.join(_prd_relativePath, _prd_file.sourceFileName)}' is missing in path : '{_missingPath}', creating copy.")
+        
+    log.critical (f"Completed Step 1")
+
+def step_1_old (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputUsingRelPaths:bool=True, compareFolders:list[str]=None, streamNameGroups:dict[str, list[str]] = None, quite_logging=True):
     """Collect files by sub-directory comapred to source path for comparisons."""
     log.critical (f"Starting Step 1")
     if (not os.path.isdir(sourcePath)):

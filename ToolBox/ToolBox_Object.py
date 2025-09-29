@@ -492,6 +492,44 @@ class ToolBox_FileData (UserDict):
         return self
     
     @ToolBox_Decorator
+    def set_Jobs_STREAMLOGON (self, value:str, filter_worksataiton:list[str]=None, filter_folder:list[str]=None, filer_streamName:list[str]=None, filter_jobNames:list[str]=None):
+        for _stream_id in range(len(self._idCollections['_STREAM_START_ids'])):
+            _stream_start = self._idCollections['_STREAM_START_ids'][_stream_id]
+            _stream_end = self._idCollections['_STREAM_END_ids'][_stream_id]+1
+            _skip:bool = False
+            _job_ids = [_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start < _id < _stream_end]
+            for _i in range(len([_id for _id in self._idCollections['_JOB_START_ids'] if _stream_start < _id < _stream_end])):
+                _job_line_start = _job_ids[_i]
+                _job_line_stop = int(_job_ids[_i+1])-1 if _i < (len(_job_ids)-1) else int(_stream_end -1)
+                if (filter_worksataiton != None) and (len(filter_worksataiton) >= 1) :
+                    for _ws_term in filter_worksataiton:
+                        if (_ws_term.upper() not in self._modLines[_job_line_start].upper()):
+                            _skip = True
+                if (filter_folder != None) and (len(filter_folder) >= 1) :
+
+                    for _fl_term in filter_folder:
+                        if (_fl_term.upper() not in self._modLines[_job_line_start].upper()):
+                            _skip = True
+                if (filer_streamName != None) and (len(filer_streamName) >= 1) :
+
+                    for _name_term in filer_streamName:
+                        if (_name_term.upper() not in self._modLines[_job_line_start].upper()):
+                            _skip = True
+                _target_name = f"{self._modLines[_stream_start].split(' ')[1]}.{self._modLines[_job_line_start].strip().split('/')[-1]}"
+                if _skip == True:                 
+                    self._logger.debug (f"Skipping job : '{_target_name}', does not match search criteria : ")
+                    continue
+                _logon_ids = [_sl_idx for _sl_idx in self._idCollections['_STREAMLOGON_ids'] if _job_line_start < _sl_idx < _job_line_stop]
+                _value = value.replace('\r','\\r').replace('\n','\\n')
+                for _i in range(len(_logon_ids)):
+                    _line_text = self._modLines[_logon_ids[_i]]
+                    _search_term = 'STREAMLOGON'
+                    _pattern = r'(' + re.escape(_search_term) + r'\s+)\S+'
+                    self._modLines[_logon_ids[_i]] = re.sub(_pattern, lambda m: m.group(1) + _value, _line_text, 1)
+                    self._logger.debug(f"Changing STREAMLOGON for Job '{_target_name}' to :", data=_value)    
+
+
+    @ToolBox_Decorator
     def copy_Streams_By_Workstation (self, sourceWorkstation:str, targetWorkstation:str) -> bool:
         self.update_mod_lineIDs()
         _found_source_items : list[dict[str,int|str]] = []
