@@ -89,14 +89,14 @@ def step_1 (
             
             if (len(_windows_jobs) >= 1):
                 log.info (f"Found [{len(_windows_jobs)}] Jobs in file : '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}'")
-                _file.set_Jobs_STREAMLOGON("RI\rixix_autosys",filter_jobNames=_windows_jobs)
+                _file.set_Jobs_STREAMLOGON('"^USER_CHS_{ENV}^"',filter_jobNames=_windows_jobs)
                 _outputPath = os.path.join (outputputRootPath, _file.sourceFileDirRelPath)
                 os.makedirs(_outputPath, exist_ok=True)
-                _file.saveTo(_outputPath, useRelPath=True)
+                _file.saveTo(_outputPath, useRelPath=False)
                 _updated_count += 1
                 _file.closeFile()
             else:
-                log.info (f"skipping file : '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}', does nto match filter criteria")
+                log.info (f"skipping file : '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}', does not match filter criteria")
 
     log.info (f" Updated a total of [{_updated_count}] files")
     log.critical (f"Completed Step 1")
@@ -122,7 +122,7 @@ if __name__ == "__main__":
         outputputRootPath = os.path.join (working_directory, 'step_1'),
         outputUsingRelPaths = True,
         workstationFilterList = [
-            "@MACH7#",# "CHINFADEV02", "CHINFAPROD02"            
-            "@MACH8#"# "RIXODCWPAPP001"
+            "@MACH7#", # "CHINFADEV02", "CHINFAPROD02"            
+            "@MACH8#" # "RIXODCWPAPP001"
         ]
     )
