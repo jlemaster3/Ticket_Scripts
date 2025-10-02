@@ -2,9 +2,9 @@
 #   Imports
 #-------------------------------------------------
 import os, re, shutil, copy
-from typing import Optional, List, Any
+from typing import Optional, List
 from ToolBox.ToolBox_logger import OutputLogger
-from ToolBox.ToolBox_Object import ToolBox_IWS_JIL_File
+from ToolBox.ToolBox_Object import ToolBox_IWS_JIL_File, ToolBox_IWS_JobStreamObj
 
 #-------------------------------------------------
 #   Global - Functions
@@ -12,13 +12,14 @@ from ToolBox.ToolBox_Object import ToolBox_IWS_JIL_File
 
 def gather_files (
     source_path: str,
+    include_subfolders: Optional[List[str]] = None,
     exclude_subfolders: Optional[List[str]] = None,
     include_name_terms: Optional[List[str]] = None,
     exclude_name_terms: Optional[List[str]] = None,
     include_formats: Optional[List[str]] = None,
     exclude_formats: Optional[List[str]] = None,
     quite_logging:bool = False
-) -> list[ToolBox_IWS_JIL_File] | None:
+) -> dict[str,list[ToolBox_IWS_JIL_File]] | None:
     """Collects full file paths from a source directory with optional filtering.
 
     Parameters
@@ -45,6 +46,7 @@ def gather_files (
     if not(os.path.exists(source_path)):
         log.warning(f"Unable to find path in sourcePaths List. target Path: '{source_path}'")
         return None
+    _include_subfolders = [_term.lower() for _term in (include_subfolders or [])]
     _exclude_subfolders = [_term.lower() for _term in (exclude_subfolders or [])]
     _include_name_terms = [_term.lower() for _term in (include_name_terms or [])]
     _exclude_name_terms = [_term.lower() for _term in (exclude_name_terms or [])]
@@ -53,34 +55,49 @@ def gather_files (
     if len(_exclude_subfolders) >= 1 : log.info(f"Exclude Directory Paths containing Terms : ", data=_exclude_subfolders)
     if len(_exclude_name_terms) >= 1 : log.info(f"Exclude Files Names containing Terms : ", data=_exclude_name_terms)
     if len(_exclude_formats) >= 1 : log.info(f"Exclude Foramts : ", data=_exclude_formats)
+    if len(_include_subfolders) >= 1 : log.info(f"Isolating Directory Paths containing Terms : ", data=_include_subfolders)
     if len(_include_name_terms) >= 1 : log.info(f"Isolating files by terms : ", data=_include_name_terms)
-    if len(_include_name_terms) >= 1 : log.info(f"Directory Paths containing Terms : ", data=_include_name_terms)
-    _file_collection = []
+    if len(_include_formats) >= 1 : log.info(f"Isolating files by formats : ", data=_include_formats)
+    _file_collection = {}
+    _totalCounter = 0
+    _collectedCounter = 0
+    _relPaths = {}
     for _root, _dirs, _files in os.walk(source_path, topdown=True):
-        _dirs[:] = [ d for d in _dirs if not any(excl.lower() in os.path.join(_root, d).lower() for excl in _exclude_subfolders)]
+        if len(_exclude_subfolders) >= 1:
+            _dirs[:] = [ d for d in _dirs if not any(excl.lower() in os.path.join(_root, d).lower() for excl in _exclude_subfolders)]
+        if len(_include_subfolders) >= 1:
+            _dirs[:] = [ d for d in _dirs if any (incl.lower() in os.path.join(_root, d).lower() for incl in _include_subfolders)]
         for _file in _files:
-            
-            _name = os.path.splitext(_file)[0]
-            _ext = os.path.splitext(_file)[1].lower()
-            if include_name_terms and not any(term in _name.lower() for term in _include_name_terms) : 
-                if (quite_logging != True): log.debug(f"File name does not match any of the include search terms.")
+            _totalCounter += 1
+            _leaf_path = os.path.relpath(_root, source_path)
+            if _leaf_path not in _file_collection.keys():
+                    _file_collection[_leaf_path] = []
+            _fileName = os.path.splitext(_file)[0]
+            _fileExt = os.path.splitext(_file)[1].lower()
+            if include_name_terms and not any(term in _fileName.lower() for term in _include_name_terms) : 
+                if (quite_logging != True): log.debug(f"File '{_fileName}' does not match any of the include search terms.")
                 continue
-            if any(term.lower() in _name.lower() for term in _exclude_name_terms) : 
-                if (quite_logging != True): log.debug(f"File name contains a matchto one of the excluded search term.")
+            if any(term.lower() in _fileName.lower() for term in _exclude_name_terms) : 
+                if (quite_logging != True): log.debug(f"File '{_fileName}' contains a match to one of the excluded search term.")
                 continue
-            if include_formats and _ext.lower() not in _include_formats : 
-                if (quite_logging != True): log.debug(f"File format not listed in the include format list.")
+            if include_formats and _fileExt.lower() not in _include_formats : 
+                if (quite_logging != True): log.debug(f"File '{_fileName}' format not listed in the include format list.")
                 continue
-            if _ext.lower() in _exclude_formats : 
-                if (quite_logging != True): log.debug(f"File foramt listed in the exclude foramts list.")
+            if _fileExt.lower() in _exclude_formats : 
+                if (quite_logging != True): log.debug(f"File '{_fileName}' contains a format in the exclude foramts list.")
                 continue
-            
             _full_path = os.path.join(_root, _file)
-            if (quite_logging != True): log.debug(f"Adding File to collection : '{_full_path}'")
-            
-            if _ext == '.jil':
+            if _fileExt == '.jil':
+                if (quite_logging != True): log.debug(f"Adding File to collection : '{_full_path}'")
+                if _leaf_path not in _relPaths.keys():
+                    _relPaths[_leaf_path] = []
+                _relPaths[_leaf_path].append(_file)
                 _fileData = ToolBox_IWS_JIL_File(_full_path, rootPath=source_path)
-                _file_collection.append(_fileData)
+                if _fileData.sourceFileDirRelPath not in _file_collection.keys():
+                    _file_collection[_fileData.sourceFileDirRelPath] = []
+                _file_collection[_fileData.sourceFileDirRelPath].append(_fileData)
+                _collectedCounter += 1
+    log.info(f"Collected [{_collectedCounter}] Files out of [{_totalCounter}] files in [{len(_relPaths)}] diffrent sub-directories : ",data = _relPaths)
     return _file_collection        
 
 
@@ -180,13 +197,59 @@ def gather_files_old (
     return _found_file_list
 
 
+def merge_missing_jobs_A_to_B (
+    jobStream_A:ToolBox_IWS_JobStreamObj, 
+    jobStream_B:ToolBox_IWS_JobStreamObj, 
+    worksataiton_criteria:list[tuple[str,str]] = None,
+    folder_criteria:list[tuple[str,str]] = None,
+    streamName_criteria:list[tuple[str,str]] = None,
+) -> bool:
+    log = OutputLogger.get_instance()
+
+    _data_A = dict(jobStream_A.jobObjects())
+    _data_B = dict(jobStream_B.jobObjects())
+    _list_A = list(_data_A.keys())
+    _list_B = list(_data_B.keys())
+    _merged = {}
+
+    for _key_B in _list_B:
+        _merged[_key_B] = _data_B[_key_B]
+        # Check if there are A-elements that should come after this key
+        try:
+            _idx_A = _list_A.index(_key_B)
+        except ValueError:
+            _idx_A = None
+        if _idx_A is not None:
+            # Look ahead in A to find missing elements that follow this key
+            _insert_idx = _idx_A + 1
+            while _insert_idx < len(_list_A):
+                _next_key = _list_A[_insert_idx]
+                if _next_key not in _merged.keys() and _next_key not in _list_B:
+                    # Insert missing element from A here
+                    log.debug (f"Missing Job '{_next_key}' in Job Steam : '{jobStream_A.name_path}', merging Job.")
+                    _merged[_next_key] = _data_A[_next_key]
+                elif _next_key in _list_B:
+                    # Stop inserting once we reach a key already in B
+                    break
+                _insert_idx += 1
+
+        for _key_A in _list_A:
+            if _key_A not in _merged:
+                _merged[_key_A] = _data_A[_key_A]
+    # Handle any keys in A that never found a predecessor in B
+    if _merged != _data_B:
+        jobStream_B._job_collection = _merged
+        return True
+    else:
+        return False
 
 
-def sync_Files_A_to_B (
+def merge_missing_streams_A_to_B (
         file_A:ToolBox_IWS_JIL_File, 
         file_B:ToolBox_IWS_JIL_File, 
         worksataiton_criteria:list[tuple[str,str]] = None,
-        folder_criteria:list[tuple[str,str]] = None
+        folder_criteria:list[tuple[str,str]] = None,
+        streamName_criteria:list[tuple[str,str]] = None,
     ):
     """Compares Job Streams from File A to File B. 
         - If source Stream from File A is not found in File B, the Stream will be copied to File B.
@@ -194,31 +257,32 @@ def sync_Files_A_to_B (
 
         Source IWS Workstations to target IWS Workstations can be applied as a filter if provided, otherwise exact match is required.
         Source IWS Folder to target IWS Folder can be applied as a filter if provided, otherwise exact match is required.
-    """
+    """ 
 
     log = OutputLogger.get_instance()
     file_A.openFile()
+    file_A._reload_streams_and_jobs()
+    _streams_A = list(file_A.jobStreamPaths)
     file_B.openFile()
+    file_B._reload_streams_and_jobs()
+    _streams_B = list(file_B.jobStreamPaths)
 
-    _file_A_streams = set(file_A.jobStreamPaths)
-    _file_B_streams = set(file_B.jobStreamPaths)
+    _file_A_streams = set(_streams_A)
+    _file_B_streams = set(_streams_B)
 
-    for _streamPath_A in _file_A_streams:
-        _skip = False
-        if (worksataiton_criteria is not None) and (len(worksataiton_criteria) >= 1):
-            for _ws in [_item[0] for _item in worksataiton_criteria if _item[0].upper() not in _streamPath_A.upper()]:
-                _skip = True
-        if (folder_criteria is not None) and (len(folder_criteria) >= 1):
-            for _fl in [_item[0] for _item in folder_criteria if _item[0].upper() not in _streamPath_A.upper()]:
-                _skip = True
-        if _skip == True:
-            log.debug(f"Skipping source Stream '{_streamPath_A}', did not match filter criteria.")
-            continue
-        _stream_A_name = _streamPath_A.split('/')[-1]
+    _A_only_Streams = _file_A_streams - _file_B_streams
+    _matching_streams = list(_file_A_streams.intersection(_file_B_streams))
+    if len(_A_only_Streams) >= 1:
+        for _streamPath in _A_only_Streams:            
+            log.debug (f"Stream '{_streamPath}' only found in file : '{os.path.join(file_A.sourceFileDirRelPath, file_A.sourceFileName)}' and not found in file : '{os.path.join(file_B.sourceFileDirRelPath, file_B.sourceFileName)}', duplicated Stream to file.")
+            _streamData = copy.deepcopy(file_A.get_stream_by_name(_streamPath.split('/')[-1].split('.')[0]))
+            file_B._jobStream_collection[_streamPath] = _streamData
 
-        for _streamPath_B in _file_B_streams:
-            if (worksataiton_criteria is not None) and (len(worksataiton_criteria) >= 1):
-                for __ws in [_item[0] for _item in worksataiton_criteria if _item[0].upper() not in _streamPath_A.upper()]:
-                    _skip = True
-
-    return None
+    if len(_matching_streams) >= 1:
+        for _stream_key in _matching_streams:
+            log.debug (f"Found mathcing Job Stream : '{_stream_key}' in both files, reviewing internal Jobs.")
+            _stream_A = file_A.get_stream_by_name(_stream_key.split('.')[0])
+            _stream_B = file_B.get_stream_by_name(_stream_key.split('.')[0])
+            _found_changes = merge_missing_jobs_A_to_B(_stream_A, _stream_B)
+            if _found_changes == False:
+                log.debug (f"No diffrences found in number of Jobs between Job Stream : '{os.path.join(file_A.sourceFileDirRelPath,file_A.sourceFileName)}' - '{_stream_A.name_path}' and Job Stream : '{os.path.join(file_B.sourceFileDirRelPath,file_B.sourceFileName)}' - '{_stream_B.name_path}'")
