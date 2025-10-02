@@ -49,7 +49,7 @@ class OutputLogger(logging.Logger):
         _log_path = os.path.join(_log_folder, _log_file)
         _fileHandler = logging.FileHandler(_log_path, mode='w', encoding='utf-8')
         _fileHandler.setLevel(_level)
-        _formatter = logging.Formatter('{asctime} | {levelname:<8s} | {funcName:<32} | {message}', datefmt="%Y-%m-%d %H:%M:%S", style='{')
+        _formatter = logging.Formatter('{asctime} | {levelname:<8s} | {funcName:<38} | {message}', datefmt="%Y-%m-%d %H:%M:%S", style='{')
         _fileHandler.setFormatter(_formatter)
         self.addHandler(_fileHandler)
         _streamHandler = logging.StreamHandler()

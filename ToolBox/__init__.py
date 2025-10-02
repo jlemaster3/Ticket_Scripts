@@ -1,7 +1,7 @@
 from ToolBox.ToolBox_logger import OutputLogger
 from ToolBox.ToolBox_Object import ToolBox_Decorator, ToolBox_IWS_JIL_File, ToolBox_IWS_JobStreamObj, ToolBox_IWS_JobObj
 from ToolBox.ToolBox_Utilities import gather_files
-from ToolBox.ToolBox_Utilities import sync_Files_A_to_B
+from ToolBox.ToolBox_Utilities import merge_missing_streams_A_to_B
 
 
 """
