@@ -1,9 +1,9 @@
 #-------------------------------------------------
 #   Imports
 #-------------------------------------------------
-import os, re, copy, uuid, warnings
+import os, re, copy, uuid, warnings, difflib
 from collections import UserDict
-from typing import Any, Match
+from typing import Any, Match, Optional
 from ToolBox.ToolBox_logger import OutputLogger
 
 #-------------------------------------------------
@@ -21,22 +21,47 @@ class ToolBox_IWS_JobObj (UserDict):
     _id:str = None
     _logger:OutputLogger = OutputLogger().get_instance()
     _sourceFile:str = None
+    _parentPath:str = None
     _jobPath:str = None
+    _jobWorkstation:str = None
+    _jobFolder:str = None
     _jobName:str = None
     _jobAlias:str = None
     _source_job_def_text:str = None
     _modified_job_def_text:str = None
     
-    def __init__(self, path:str, definition_text:str, alias_name:str=None, initial_data:dict[str,Any]=None, sourceFile:str=None):
+    def __init__(self, path:str, definition_text:str, parent_path:str=None, alias_name:str=None, initial_data:dict[str,Any]=None, sourceFile:str=None):
         super().__init__(initial_data)
         _id = str(uuid.uuid5(uuid.NAMESPACE_DNS, path))
         self._id = str(_id)
         self._jobPath = path
-        self._jobName = path.split('/')[-1]
-        self._jobAlias = alias_name if alias_name != None and len(alias_name) >= 1 else None
+        _j_parts = path.split('/')
+        self._jobWorkstation = _j_parts.pop(0)
+        self._jobName = _j_parts.pop(-1)
+        self._jobFolder = '/'.join(_j_parts)
+        self._jobAlias = alias_name
+        self._parentPath = parent_path        
         self._source_job_def_text = definition_text
         self._modified_job_def_text = definition_text
         self._sourceFile = sourceFile
+
+    @ToolBox_Decorator
+    def _reset_values_from_modified_text (self):
+        _job_start_ids:list[int] = []
+        _lines = self._modified_job_def_text.splitlines()
+        for _line_id, _line in enumerate(_lines):
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :#or (any(_s in str(_line).strip()[0:5] for _s in ['PRD#', 'NPR#'])) and ('#' in str(_line[2:]).strip()):
+                _job_start_ids.append(_line_id)
+        for _i in range(len(_job_start_ids)):
+            _line = _lines[_job_start_ids[_i]]
+            self._jobPath = _line.strip().split(' ')[0]
+            _j_parts = self._jobPath.split('/')
+            self._jobWorkstation = _j_parts.pop(0)
+            self._jobName = _j_parts.pop(-1)
+            self._jobFolder = f"/{'/'.join(_j_parts)}/"
+            _alias_index = _line.find(" AS ")
+            self._jobAlias = _line[_alias_index+3:].strip().split(' ')[0] if _alias_index != -1 else None
+        return self
 
     def __str__(self) -> str:
         return self._modified_job_def_text
@@ -56,15 +81,40 @@ class ToolBox_IWS_JobObj (UserDict):
         return self._jobName
     
     @property
+    def name_fullPath (self) -> str:
+        """Returns path of the Job Stream, {jobName} will be the alias if used, formatted : {workstation}/{folderPath}/{jobStreamName}.{jobName} or {workstation}/{folderPath}/{jobName}"""
+        _ouput = None
+        if (self._parentPath is None):
+            _ouput = self._jobPath
+        else:
+            _js_parts = list(self._parentPath.split('/'))
+            _js_ws = _js_parts.pop(0)
+            _js_name = _js_parts.pop(-1).replace('.@','').strip()
+            _js_folder = '/'.join(_js_parts)
+            _j_name = self._jobName if (self._jobAlias is None) or (self._jobAlias.strip() == '') else self._jobAlias
+            if (_js_ws.upper() in self._jobWorkstation.upper()) and (_js_folder.upper() in self._jobFolder.upper()):
+                _ouput = f"{_js_ws}/{_js_folder}/{_js_name}.{_j_name}"
+            else:
+                _ouput = f"{self._jobWorkstation}{self._jobFolder}{_j_name}"
+            
+        return _ouput
+    
+    @property
     def alias (self) -> str:
         """Returns assigned Alias for Job Name as stored in IWS."""
         return self._jobAlias
     
     @property
     def path (self) -> str:
-        """Returns assigned Path for Job Name as stored in IWS."""
+        """Returns assigned Path for Job Name as stored in IWS. formatted : {workstation}/{folderPath}/{jobName}"""
         return self._jobPath
 
+    @ToolBox_Decorator
+    def change_parent_path (self, path:str):
+        if (path is not None or path.strip() != '') and (self._parentPath.upper() != path.upper()):
+            self._parentPath = path
+        return self
+    
     @ToolBox_Decorator
     def reset_modfied_text (self):
         if self._modified_job_def_text != self._source_job_def_text:
@@ -72,8 +122,11 @@ class ToolBox_IWS_JobObj (UserDict):
         return self
     
     @ToolBox_Decorator
-    def search_replace_text (self, searchString:str, replaceString:str) :
+    def search_replace_text (self, searchString:str, replaceString:str, updated_source:bool=False) :
         self._modified_job_def_text = re.sub(searchString, replaceString, self._modified_job_def_text, flags=re.IGNORECASE)
+        if updated_source == True:
+            self._source_job_def_text = re.sub(searchString, replaceString, self._source_job_def_text, flags=re.IGNORECASE)
+        self._reset_values_from_modified_text()
         return self
     
     @ToolBox_Decorator
@@ -101,6 +154,8 @@ class ToolBox_IWS_JobStreamObj (UserDict):
     _logger:OutputLogger = OutputLogger().get_instance()
     _sourceFile:str = None
     _streamPath:str = None
+    _streamWorkstation:str = None
+    _streamFolder:str = None
     _streamName:str = None
     _source_stream_def_text:str = None
     _source_stream_end_text:str = None
@@ -113,7 +168,10 @@ class ToolBox_IWS_JobStreamObj (UserDict):
         _id = str(uuid.uuid5(uuid.NAMESPACE_DNS, path))
         self._id = str(_id)
         self._streamPath = path
-        self._streamName = path.split('/')[-1]
+        _js_parts = path.split('/')
+        self._streamWorkstation = _js_parts.pop(0)
+        self._streamName = _js_parts.pop(-1)
+        self._streamFolder = '/'.join(_js_parts)
         self._source_stream_def_text = definition_text
         self._source_stream_end_text = end_text
         self._modified_stream_def_text = definition_text
@@ -122,6 +180,29 @@ class ToolBox_IWS_JobStreamObj (UserDict):
         self._job_collection = {}
         self.reset_modfied_text()
 
+    @ToolBox_Decorator
+    def _reset_values_from_modified_text (self):
+        _lines = str(self._modified_stream_def_text).splitlines()
+        _stream_start_ids:list[int] = []
+        _stream_edge_ids:list[int] = []
+        _stream_end_ids:list[int] = []
+        for _line_id, _line in enumerate(_lines):
+            if "SCHEDULE" in str(_line).strip()[0:9]:
+                _stream_start_ids.append(_line_id)
+            if ':' in _line[0:2]:
+                _stream_edge_ids.append(_line_id)
+            if "END" in str(_line).strip()[0:4] and 'ENDJOIN' not in str(_line).strip():
+                _stream_end_ids.append(_line_id)
+        for _id_index in range(len(_stream_start_ids)):
+            _line = _lines[_stream_start_ids[_id_index]]
+            self._streamPath = str(_line.split(' ')[1])
+            _js_parts = self._streamPath.split('/')
+            self._streamWorkstation = _js_parts.pop(0)
+            self._streamName = _js_parts.pop(-1)
+            self._streamFolder = f"/{'/'.join(_js_parts)}/"
+            
+        return self
+    
     def __str__(self) -> str:
         _textHolder = self._modified_stream_def_text + '\n'
         _textHolder += "\n\n\n".join([str(_job.__str__()) for _job in self._job_collection.values()])
@@ -157,22 +238,36 @@ class ToolBox_IWS_JobStreamObj (UserDict):
     @ToolBox_Decorator
     def job_list (self) -> list[str]:
         """Returns a list of the full paths for each job in this Job Stream, {workstation}/{folderPath}/{jobStreamName}.{jobName} AS {aliasName}"""
-        return [f"{self.name}.{_job.name.upper()}" for _job in self._job_collection.values()]
+        _list = []
+        for _job in self._job_collection.values():
+            if _job.name_fullPath not in _list:
+                _list.append(_job.name_fullPath)
+        return _list
     
     @ToolBox_Decorator
     def jobObjects (self) -> dict[str,ToolBox_IWS_JobObj]:
         _data:dict[str,ToolBox_IWS_JobObj] = {}
         for _job in self._job_collection.values():
-            _jobPath = f"{self.name_path}.{_job.name}"
-            if _jobPath not in _data.keys():
-                _data[_jobPath] = _job
+            if _job.name_fullPath not in _data.keys():
+                _data[_job.name_fullPath] = _job
         return _data
 
     
     @ToolBox_Decorator
-    def add_Job_definition (self, path:str, definition_text:str, alias_name:str=None, initial_data:dict[str,Any]=None, sourceFile:str=None):
-        if path not in self._job_collection.keys():
-            self._job_collection[path] = ToolBox_IWS_JobObj(path, definition_text, alias_name=alias_name, initial_data=initial_data, sourceFile=sourceFile or self._sourceFile)
+    def add_Job_definition (self, path:str, definition_text:str, parent_path:str=None, alias_name:str=None, initial_data:dict[str,Any]=None, sourceFile:str=None):
+        _parent_path = parent_path if parent_path is not None else self.name_fullPath
+        _source_file = sourceFile if sourceFile is not None else self._sourceFile
+
+        # create new job if missing
+        _new_obj = ToolBox_IWS_JobObj(
+            path = path,
+            definition_text = definition_text,
+            parent_path = _parent_path,
+            alias_name = alias_name,
+            initial_data = initial_data,
+            sourceFile = _source_file
+        )
+        self._job_collection[_new_obj.name_fullPath] = _new_obj
         return self
     
     @ToolBox_Decorator
@@ -216,6 +311,7 @@ class ToolBox_IWS_JobStreamObj (UserDict):
         self._modified_stream_def_text = re.sub(searchString, replaceString, self._modified_stream_def_text, flags=re.IGNORECASE)
         for _job in self._job_collection.values():
             _job.search_replace_text(searchString, replaceString)
+        self._reset_values_from_modified_text()
         return self
     
     @ToolBox_Decorator
@@ -261,6 +357,20 @@ class ToolBox_IWS_JobStreamObj (UserDict):
     
     def remove_RUNCYCLE_lines (self):
 
+        return self
+    
+    @ToolBox_Decorator
+    def set_Jobs_NOP (self, value:bool = True, filter_worksataiton:list[str]=None, filter_folder:list[str]=None, filer_streamName:list[str]=None, filer_jobName:list[str]=None):
+        for _job in self._job_collection.values():
+            _skip = False
+            if (filter_worksataiton is not None) and all( _ws.upper() not in _job.name_fullPath.upper() for _ws in filter_worksataiton): 
+                _skip = True
+            if (filter_folder is not None) and all( _f.upper() not in _job.name_fullPath.upper() for _f in filter_folder): 
+                _skip = True
+            if (filer_jobName is not None) and all( _jn.upper() not in _job.name.upper() for _jn in filer_jobName): 
+                _skip = True
+            if _skip == True : continue
+            _job.set_NOP(value=value)
         return self
 
 class ToolBox_IWS_JIL_File (UserDict):
@@ -335,12 +445,12 @@ class ToolBox_IWS_JIL_File (UserDict):
         """Returns the relative path of the file (sourceFileDir minus the sourceFileDirRoot)"""
         return os.path.relpath(os.path.dirname(self._sourceFile), self._rootPath)
 
-    @property
+    @ToolBox_Decorator
     def jobStreamObjects (self) -> dict[str,ToolBox_IWS_JobStreamObj]:
         """Returns a list of Job Steram objects in file."""
         return self._jobStream_collection.items()
 
-    @property
+    @ToolBox_Decorator
     def jobStreamPaths (self) -> list[str]:
         """Returns a list of Job Stream paths found in file, formatted: {workstation}/{folderPath}/{jobStreamName}.@]"""
         return [_js.name_fullPath for _js in self._jobStream_collection.values()]
@@ -350,7 +460,7 @@ class ToolBox_IWS_JIL_File (UserDict):
         """Returns a list of Job objects in file."""
         _data:dict[str,ToolBox_IWS_JobObj] = {}
         for _streamObj in self._jobStream_collection.values():
-            for _j_path, _j_obj in _streamObj.jobObjects.items():
+            for _j_path, _j_obj in _streamObj.jobObjects().items():
                 if _j_path not in _data.keys():
                     _data[_j_path] = _j_obj
         return _data
@@ -359,9 +469,10 @@ class ToolBox_IWS_JIL_File (UserDict):
     def jobPaths (self) -> list[str]:
         """Returns a list of Job paths found in file, formatted: {workstation}/{folderPath}/{jobStreamName}.{jobName}]"""
         _list = []
-        for _j in self._jobStream_collection.values():
-            if _j.name_fullPath not in _list:
-                _list.append(_j.name_fullPath)
+        for _js in self._jobStream_collection.values():
+            for _jpath in _js.job_list():
+                if _jpath not in _list:
+                    _list.append(_jpath)
         return _list
 
     @ToolBox_Decorator
@@ -455,18 +566,15 @@ class ToolBox_IWS_JIL_File (UserDict):
                 _job_line_start = _job_ids[_job_id_index]
                 _job_line_stop = int(_job_ids[_job_id_index+1])-1 if _job_id_index < (len(_job_ids)-1) else int(_stream_end -1)
                 _job_definition_text = "\n".join([_line for _line in self._sourceFileLines[_job_line_start:_job_line_stop] if _line.strip() != ''])
-                _job_name = self._sourceFileLines[_job_line_start].strip().split('/')[-1].split('/')[-1]
-                _alias_pattern = r"(\w+)\s+" + re.escape(" AS ") + r"\s+(\w+)"
-                _alias_matches = re.findall(_alias_pattern, self._sourceFileLines[_job_line_start], flags=re.IGNORECASE)
-                _job_path = f"{_stream_path}.{_job_name}"
-                if len(_alias_matches) >= 1:
-                    print (_job_path, "alias matchs : ", _alias_matches)
-                else:
-                    _alias_matches = None
+                _source_job_line = str(self._sourceFileLines[_job_line_start])
+                _job_path = _source_job_line.strip().split(' ')[0]
+                _alias_index = _source_job_line.find(" AS ")
+                _alias_name = _source_job_line[_alias_index+3:].strip().split(' ')[0] if _alias_index != -1 else None
                 self._jobStream_collection[_stream_path].add_Job_definition(
                     path= _job_path, 
                     definition_text=_job_definition_text,
-                    alias_name=_alias_matches,
+                    parent_path=f"{_stream_path}.@",
+                    alias_name=_alias_name,
                     initial_data=None, 
                     sourceFile=_source_file
                 )   
@@ -521,6 +629,44 @@ class ToolBox_IWS_JIL_File (UserDict):
             if (name.upper() in _streamPath.upper()):
                 return _streamData
         return None
+    
+    @ToolBox_Decorator
+    def get_job_stream (self, workstation:Optional[str]=None, folder:Optional[str]=None, name:Optional[str]=None) -> Optional[ToolBox_IWS_JobStreamObj]:
+        """Returns the 1st Job Stream Data block for the search terms.
+            - workstation - string
+            - folder - string
+            - name - string
+        One or more search terms will be required or results will be none.
+        """
+        _search_terms = []
+        if workstation is not None or workstation.strip() == '': _search_terms.append(workstation)
+        if folder is not None or folder.strip() == '': _search_terms.append(folder)
+        if name is not None or name.strip() == '': _search_terms.append(name)
+        if (len(_search_terms) == 0):
+            warnings.warn(f"Returning None, no search criteria has been provided, all search terms provided are 'NoneType' or blank")
+            return None
+        _best_match = None
+        _highest_score = -1
+        for _jobStreamObj in self.get_jobStreamObjects():
+            _streamPath = _jobStreamObj.name_fullPath.split('.')[0]
+            _parts = _streamPath.split('/')
+            _js_ws = _parts.pop(0)
+            _js_name = _parts.pop(-1)
+            _js_folder = '/'.join(_parts)
+            _score = 0
+            if workstation is not None or workstation.strip() == '':
+                if workstation.upper() in _js_ws.upper(): _score += 10
+                if workstation.upper() == _js_ws.upper(): _score += 5
+            if folder is not None or folder.strip() == '':
+                if folder.upper() in _js_folder.upper(): _score += 10
+                if folder.upper() == _js_folder.upper(): _score += 5
+            if name is not None or name.strip() == '':
+                if name.upper() in _js_name.upper(): _score += 10
+                if name.upper() == _js_name.upper(): _score += 5
+            if _score != 0 and _score > _highest_score:
+                _best_match = _jobStreamObj
+                _highest_score = _score
+        return _best_match
 
     @ToolBox_Decorator
     def set_Streams_ONREQUEST (self, value:bool = True, filter_worksataiton:list[str]=None, filter_folder:list[str]=None, filer_streamName:list[str]=None):
@@ -557,16 +703,16 @@ class ToolBox_IWS_JIL_File (UserDict):
             _stream_keys = [_path for _jsn in filer_streamName for _path in _stream_keys if _jsn.upper() in _path.upper()]
         for _key in _stream_keys:
             _stream = self._jobStream_collection[_key]
-            for _job in _stream.job_list():
+            for _jobPath in _stream.job_list():
                 _skip = False
-                if (filter_worksataiton is not None) and all( _ws.upper() not in _job.upper() for _ws in filter_worksataiton): 
+                if (filter_worksataiton is not None) and all( _ws.upper() not in _jobPath.upper() for _ws in filter_worksataiton): 
                     _skip = True
-                if (filter_folder is not None) and all( _f.upper() not in _job.upper() for _f in filter_folder): 
+                if (filter_folder is not None) and all( _f.upper() not in _jobPath.upper() for _f in filter_folder): 
                     _skip = True
-                if (filer_jobName is not None) and all( _jn.upper() not in _job.upper() for _jn in filer_jobName): 
+                if (filer_jobName is not None) and all( _jn.upper() not in _jobPath.upper() for _jn in filer_jobName): 
                     _skip = True
                 if _skip == True : continue
-                _jobData = _stream.get_job_by_name(_job.split('.')[-1])
+                _jobData = _stream.get_job_by_name(_jobPath.split('.')[-1])
                 _jobData.set_NOP(value=value)
         return self
                 
@@ -575,7 +721,7 @@ class ToolBox_IWS_JIL_File (UserDict):
         _target_stream = self.get_stream_by_name(jobStreamName)
         if (_target_stream is not None) and (sourceWorkstaion.upper() in _target_stream.name_path):
             _duplcaite_stream = copy.deepcopy(_target_stream) if _target_stream is not None else None
-            if _duplcaite_stream is not None and sourceWorkstaion is not None and targetWorkstation is not None:
+            if (_duplcaite_stream is not None) and (sourceWorkstaion is not None) and (targetWorkstation is not None):
                 _duplcaite_stream.search_replace_text(sourceWorkstaion, targetWorkstation)
                 _duplcaite_stream._streamPath = _duplcaite_stream._streamPath.replace(sourceWorkstaion, targetWorkstation)
                 _duplcaite_stream._streamName = _duplcaite_stream.name_path.replace(sourceWorkstaion, targetWorkstation)
