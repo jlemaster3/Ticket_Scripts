@@ -43,7 +43,6 @@ working_directory = os.path.join ("C:\\Users\\jlemaster3\\OneDrive - Gainwell Te
 #-------------------------------------------------
 #   Steps
 #-------------------------------------------------
-_saved_file_count = 0
 
 def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputUsingRelPaths:bool=True, compareFolders:list[str]=None, namedLists:dict[str, list[str]] = None, quite_logging=True):
     """Collect files by sub-directory comapred to source path for comparisons."""
@@ -65,7 +64,7 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
     log.info (f"Gathering IWS *.jil and *.job files from source : '{sourcePath}'")
     _file_collection = gather_files(
         source_path = sourcePath, 
-        #include_name_terms = namedLists["Test_List"],
+        #isolate_name_terms = namedLists["Test_List"],
         quite_logging = quite_logging
     )
 
@@ -89,6 +88,7 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
     _TEST_key_list:list[str] = [key for key in _collected_lists.keys()  if 'TEST' in key]
     _merged_paths = list(set(_UAT_key_list + _MOD_key_list + _TEST_key_list))
     _common_prefix = os.path.commonprefix(_PROD_key_list)
+    _saved_file_count = 0
     for _prd_relativePath in _PROD_key_list:
         for _prd_file in _collected_lists[_prd_relativePath]:
             log.info (f"Processing file : '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}'")
@@ -104,22 +104,34 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
                     file_A=_prd_file,
                     file_B=_file,
                 )
+                _found_name = True if any(_cn.upper() in _file.sourceFileName.upper() for _cn in namedLists["Job_Stream_List"]) else False
+                if _found_name == True :
+                    log.debug(f"File name : '{_file.sourceFileBaseName}' was found to match a term in the list : 'Job_Stream_List'.")
+                    _file.set_Streams_ONREQUEST(True)
+                    _file.set_Streams_DRAFT(False)
+                    _file.set_Jobs_NOP(False)
+
                 for _e in namedLists['BAT2_Environment_checkList']:
                     if _e.upper() in _target_outgoing.upper():
                         log.debug(f"Target output folder contains '{_e}', checking for '@BAT2' workstation refrence in file.")
-                        _found_bat2 = True if any (["@BAT2#" in _path for _path in _file.jobStreamPaths]) else False
-                        if _found_bat2 == False:
+                        _found_bat2 = True if any (["@BAT2#" in _path for _path in _file.jobStreamPaths()]) else False
+                        if _found_bat2 == True:
+                            # Bat2 found compare bat1 to bat2
+                            sync_streams_in_file (_file, {"@BAT1#" : "@BAT2#"})
+                        else:
+                            # BAT2 not found
                             log.debug(f"Can't find workstation refrerence to '@BAT2#' in file : '{os.path.join(_file.sourceFileDirRelPath, _file.sourceFileName)}', duplicating strems from workstation '@BAT1#' on workstation '@BAT2#'.")
-                            for _js_path in _file.jobStreamPaths:
+                            for _js_path in _file.jobStreamPaths():
                                 _jsName = _js_path.split('/')[-1].split('.')[0]
                                 _file.duplciate_jobStream_by_workstaion(_jsName, '@BAT1#', '@BAT2#')
 
                 _file.saveFileTo(outputputRootPath, useRelPath=True)
+                _saved_file_count += 1
                 _file.closeFile()
                 _prd_file.closeFile()
 
             for _missingPath in  _relPaths_missing_file:
-                log.info (f"File : '{os.path.join(_prd_relativePath, _prd_file.sourceFileName)}' is missing in path : '{_missingPath}', creating copy.")
+                log.debug (f"File : '{os.path.join(_prd_relativePath, _prd_file.sourceFileName)}' is missing in path : '{_missingPath}', creating copy.")
                 _target_outgoing = os.path.join(outputputRootPath, _missingPath)
                 _prd_file.openFile()
                 _prd_file._reload_streams_and_jobs()
@@ -135,17 +147,19 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
                 for _e in namedLists['BAT2_Environment_checkList']:
                     if _e.upper() in _target_outgoing.upper():
                         log.debug(f"Target output folder contains '{_e}', checking for '@BAT2' workstation refrence in file.")
-                        for _path in _prd_file.jobStreamPaths:
-                            _found_bat2 = True if any (["@BAT2#" in _path for _path in _file.jobStreamPaths]) else False
+                        for _path in _prd_file.jobStreamPaths():
+                            _found_bat2 = True if any (["@BAT2#" in _path for _path in _file.jobStreamPaths()]) else False
                             if _found_bat2 == False:
                                 log.debug(f"can't find '@BAT2#' workstation version in file : '{os.path.join(_prd_file.sourceFileDirRelPath, _prd_file.sourceFileName)}', duplicating '@BAT1#' streams")
-                                for _js_path in _prd_file.jobStreamPaths:
+                                for _js_path in _prd_file.jobStreamPaths():
                                     _jsName = _js_path.split('/')[-1].split('.')[0]
-                                    _prd_file.duplciate_jobStream_by_workstaion(_jsName, '@BAT1#', '@BAT2#')
-                                
+                                    _target_stream = _prd_file.duplciate_jobStream_by_workstaion(_jsName, '@BAT1#', '@BAT2#')
+                                    if _target_stream is not None:
+                                        _target_stream.set_ONREQUEST(True)                                
                 _prd_file.saveFileTo(_target_outgoing, useRelPath=False)
+                _saved_file_count += 1
                 _prd_file.closeFile()
-
+    log.info (f"updated a total of [{_saved_file_count}] files.")
     log.critical (f"Completed Step 1")
 
 
