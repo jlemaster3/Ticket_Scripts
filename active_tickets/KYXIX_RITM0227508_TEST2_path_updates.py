@@ -34,8 +34,11 @@ def step_1 (sourcePath:str, outputPath:str, namedLists:dict[str, list[str]] = No
     _filelist = ToolBox_Gather_Files( 
         source_dir = sourcePath, 
         isolate_directory_names = namedLists['Target_Env_list'],
+        isolate_fileName_names = namedLists['Stream_list']
     )
-
+    log.blank("-"*100)
+    log.info(f"Search Terms -> Replace Terms : [{len(namedLists['Search_Replace_Terms'].keys())}]", data = namedLists['Search_Replace_Terms'])
+    log.info(f"limiting Job Stream edits to workstations : [{len(namedLists['Workstation_list'])}]", data=namedLists['Workstation_list'], list_data_as_table=True, column_count=1)
     _files_updated = 0
     for _file in _filelist:
         _file.open_file()
@@ -61,9 +64,9 @@ def step_1 (sourcePath:str, outputPath:str, namedLists:dict[str, list[str]] = No
                             log.label(f"Checking File '{_file.relFilePath}'")
                         _job.search_replace_text(searchString=_searchTerm,replaceString=_replaceTerm)
                         _change_made = True
-        if _change_made == True:
-            _file.save_File(outputPath, useRelPath=True)
-            _files_updated += 1
+        #if _change_made == True:
+        _file.save_File(outputPath, useRelPath=True)
+        _files_updated += 1
         #else:
             #log.info(f"No changes to make, closing File '{_file.relFilePath}'")
     log.blank('-'*100)
@@ -91,12 +94,100 @@ if __name__ == "__main__":
         outputPath = os.path.join(working_directory,"TEST2"),
         namedLists = {
             "Target_Env_list" : ["TEST2"],
-            "Workstation_list" : ["@MACH7#"],
+            "Workstation_list" : ["@MACH7#", "@MACH6#"],
             "Search_Replace_Terms" : {
                 "/export/ftp/prod/": "/dsky/{ENV}/ftp/",
                 "/tmpsort2/prod/" : "/tmpsort2/{ENV}/",
-                "/cust/prod/dsky/" : "/dsky/{ENV}/"
+                "/cust/prod/dsky/" : "/dsky/{ENV}/",
+                 "/dsky/{ENV}/ftp/" : "/dsky/{ENV_FLDR}/ftp/",
+                "/tmpsort2/{ENV}/" : "/tmpsort2/{ENV_FLDR}/",
+                 "/dsky/{ENV}/" : "/dsky/{ENV_FLDR}/"
             },
+            "Stream_list" : [
+                "DBR_PFM_ETL_LD",
+                "DWSMDMVS",
+                "DWSWFT_PAIPDL",
+                "DWSWMXPA",
+                "BUYD_MMA",
+                "BUYD_MMA",
+                "BUYMBUYIN",
+                "BUYWFTPARTDFILE",
+                "BUYWFT_TBQ_FILE",
+                "BUY_DAILY_TBQ",
+                "BUY_DAILY_TBQ",
+                "BUY_DBUYIN",
+                "CLD630",
+                "CLDNDY",
+                "CLMMMMANDONTFY",
+                "CYCMMCO834EML",
+                "DRGMFT_CONTFL",
+                "DRGMFT_OUTFL",
+                "DRGMSHPAPLCONFL",
+                "DRGMSHPAPLOUTFL",
+                "DRGMSHPCON_FL",
+                "DRGMSHPOUTFL",
+                "ELGBFTCOBA70058",
+                "ELGBFTCOBA70074",
+                "ELGBFTCOBA70075",
+                "ELGBFTCOBA70083",
+                "ELGBFTCOBA70084",
+                "ELGBFTCOBA70086",
+                "ELGBFTCOBA77184",
+                "ELGBFTCOBA77185",
+                "ELGDMMANDONTFY",
+                "ELGKHBERTRRECON",
+                "ELGKHBERTRRECON",
+                "ELGMDEMO_INFO",
+                "ELGMFTRCNKHBE",
+                "ELGMFTRCNPAT",
+                "ELGMFTRCRTRKHBE",
+                "ELGMRCN1FLMON",
+                "ELG_AUTH_REP",
+                "ELG_DLYMAIDCRD",
+                "ELG_IEES_TERM",
+                "ELG_MFP_UK",
+                "ELG_MNTHRCNPAT",
+                "ELG_MONTHLY_EVV",
+                "ELG_MTH_KHBE",
+                "ELG_MTH_KHBE",
+                "ELG_VITAL_STAT",
+                "FIN_HISTORY",
+                "FIN_QNONBAL",
+                "MGDMFTPASSMBRFL",
+                "MGDMFT_AETMBRFL",
+                "MGDMFT_ANTMBRFL",
+                "MGDMFT_HUMMBRFL",
+                "MGDMFT_MOLMBRFL",
+                "MGDMFT_UHCMBRFL",
+                "MGDMFT_WELMBRFL",
+                "MGDMMCOCNTFY",
+                "MGDMMCO_CAPEXTR",
+                "MGDMMCO_MBR_AET",
+                "MGDMMCO_MBR_ANT",
+                "MGDMMCO_MBR_HUM",
+                "MGDMMCO_MBR_MOL",
+                "MGDMMCO_MBR_P31",
+                "MGDMMCO_MBR_UHC",
+                "MGDMMCO_MBR_WEL",
+                "MGDMNEMTCNTFY",
+                "MGDMPACECNTFY",
+                "MGD_DLY_MCO_MBR",
+                "PROV_DAILY_IN",
+                "REFWFTFDBFDBFL",
+                "REFWFTFDBUDBFL",
+                "RFMMAC",
+                "RFWFDB",
+                "RFWMAC",
+                "TPDWTCH",
+                "TPD_DLY_AET_DTM",
+                "TPD_DLY_ANT_DTM",
+                "TPD_DLY_HUM_DTM",
+                "TPD_DLY_MOL_DTM",
+                "TPD_DLY_UHC_DTM",
+                "TPD_DLY_WEL_DTM",
+                "TPMKCSR",
+                "TPWWTCH"
+            ]
         }
     )
     log.critical(f"End of log for ticket : {ticketNumber} under contract : {contract}")

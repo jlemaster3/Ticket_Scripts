@@ -64,7 +64,7 @@ def step_1 (sourcePath:str, workingDirectory:str, outputputRootPath:str, outputU
     log.info (f"Gathering IWS *.jil and *.job files from source : '{sourcePath}'")
     _file_collection = gather_files(
         source_path = sourcePath, 
-        #isolate_name_terms = namedLists["Test_List"],
+        isolate_name_terms = namedLists["Job_Stream_List"],
         quite_logging = quite_logging
     )
 
@@ -223,7 +223,7 @@ if __name__ == "__main__":
     step_1 (
         sourcePath = source_path,
         workingDirectory = working_directory,
-        outputputRootPath = os.path.join (working_directory, 'step_1'),
+        outputputRootPath = os.path.join (working_directory, 'step_1_old'),
         outputUsingRelPaths = True,
         compareFolders = [
             "PROD", 

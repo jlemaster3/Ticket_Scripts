@@ -47,9 +47,9 @@ def Compare_Streams_by_Environment (source_file:ToolBox_IWS_JIL_File, target_fil
         _found_name = True if any(_cn.upper() in _compFile.sourceFilePath for _cn in namedLists["Job_Stream_List"]) else False
         if _found_name == True :
             log.debug(f"File name : '{source_file.name}' was found to match a term in the list : 'Job_Stream_List'.")
-            source_file.set_all_Stream_ONREQUEST(True)
-            source_file.set_all_Streams_DRAFT(False)
-            source_file.set_all_Jobs_NOP(False)
+            _compFile.set_all_Stream_ONREQUEST(True)
+            _compFile.set_all_Streams_DRAFT(False)
+            _compFile.set_all_Jobs_NOP(False)
         for _env in namedLists['BAT2_Environment_checkList']:
             if _env.upper() in _compFile.relPath.upper():
                 log.debug(f"Target output folder contains '{_env}', checking for '@BAT2' workstation in file.")
@@ -99,7 +99,8 @@ def Step_1 (sourcePath:str, outputPath:str, namedLists:dict[str, list[str]] = No
     )
     _filelist = ToolBox_Gather_Files( 
         source_dir = sourcePath, 
-        isolate_fileName_names = namedLists["Stream_Name_filter"],
+        isolate_fileName_names = namedLists["Job_Stream_List"],
+        list_as_tables= True
     )   
     _prd_files:list[ToolBox_IWS_JIL_File] = []
     _npr_files:list[ToolBox_IWS_JIL_File] = []
@@ -195,7 +196,7 @@ if __name__ == "__main__":
 
     Step_1(
         sourcePath = source_path,
-        outputPath = os.path.join(working_directory,"testing"),
+        outputPath = os.path.join(working_directory,"step_1"),
         namedLists = {
             "Test_List" : ["Temp_test"],
             "BAT2_Environment_checkList" : ["MODB", "TESTB"],

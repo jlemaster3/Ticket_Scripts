@@ -251,12 +251,11 @@ class ToolBox_IWS_Stream_Obj (UserDict):
                 _stream_start_ids.append(_line_id)
         if (self.notes is None) or (self.notes.strip() == ''):
             _holder = [line.strip() for line in value.splitlines() if line.strip()]
-            _holder.append('')
             _holder.extend(_lines)
             self._modified_text = '\n'.join([_l for _l in _holder])
         else:
             _cur_notes:list[str] = self.notes.splitlines()
-            _new_notes:list[str] = [_l for _l in str(self._modified_text).splitlines()]
+            _new_notes:list[str] = [_l for _l in str(value).splitlines()]
             _overlap_count = 0
             _max_overlap = min(len(_cur_notes), len(_new_notes))
             for _i in range(1, _max_overlap + 1):
@@ -268,12 +267,18 @@ class ToolBox_IWS_Stream_Obj (UserDict):
                     break  # stop at the first mismatch
             if _overlap_count >= 1:
                 _to_add = _new_notes[_overlap_count:]
-            else:
-                _to_add = _new_notes
-            _cur_notes.extend(_to_add)
-            _cur_notes.append('')
-            _new_lines = _cur_notes + _line[min(_stream_start_ids):]
-            self._modified_text = '\n'.join([_l for _l in _new_lines])
+                _cur_notes.extend(_to_add)
+            _new_text = '\n'.join(_cur_notes) + '\n\n'
+            _new_text += '\n '.join(_lines[min(_stream_start_ids):])
+            self._modified_text = _new_text
+
+            #if _overlap_count >= 1:
+            #    _to_add = _new_notes[_overlap_count:]
+            #else:
+            #    _to_add = _new_notes
+            #_cur_notes.extend(_to_add)
+            #_new_lines = _cur_notes + _line[min(_stream_start_ids):]
+            #self._modified_text = '\n'.join([_l for _l in _new_lines])
     
     #------- Public Methods -------#
     
@@ -361,7 +366,8 @@ class ToolBox_IWS_Stream_Obj (UserDict):
         _lines = self._modified_text.splitlines()
         _DESCRIPTION_id = next((_idx for _idx, _line in enumerate(_lines) if 'DESCRIPTION' in _line[0:14]), -1)
         _REQUEST_id = next((_idx for _idx, _line in enumerate(_lines) if 'ON REQUEST' in _line[0:16]), -1)
-        _DRAFT_id = next((_idx for _idx, _line in enumerate(_lines) if 'DRAFT' in _line[0:10]), -1)
+        _DRAFT_id = next((_idx for _idx, _line in enumerate(_lines) if 'DRAFT' in _line), -1)
+        print (_DESCRIPTION_id, _REQUEST_id, _DRAFT_id)
         if (_DRAFT_id != -1) and (value == True):
             self.log.debug (f"Stream : '{self.full_path}' is already set to DRAFT.")
         elif (_DRAFT_id != -1) and (value == False):

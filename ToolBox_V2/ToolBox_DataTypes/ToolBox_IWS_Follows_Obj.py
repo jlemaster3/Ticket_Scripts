@@ -97,8 +97,8 @@ class ToolBox_IWS_Follows_Obj (UserDict):
                 # Split the captured group into words
                 words = re.findall(r'\b\w+\b', match.group(1))
                 # Filter out 'SAMEDAY' and 'PREVIOUS' (case-insensitive)
-                filtered = [w for w in words if w.upper() not in ('SAMEDAY', 'PREVIOUS')]
-                _results.extend(' '.join(filtered))
+                filtered = [w for w in words if w.upper() not in ['SAMEDAY', 'PREVIOUS']]
+                _results.extend(''.join(filtered))
         return ' '.join(_results)
 
     #------- Public Methods -------#
@@ -106,7 +106,7 @@ class ToolBox_IWS_Follows_Obj (UserDict):
     @ToolBox_Decorator
     def get_current_text(self) -> str:
         """Returns the current text of this Job."""
-        return self._modified_text
+        return self._modified_text.strip()
     
     @ToolBox_Decorator
     def reset_modfied_text (self):
@@ -237,9 +237,8 @@ class ToolBox_IWS_Join_Obj (UserDict):
     @ToolBox_Decorator
     def get_current_text(self) -> str:
         """Returns the current text of this Join and included follows objects."""
-        _text = f"JOIN {self.name} {self.number} OF"
-        for _f_obj in self._follows_collection:
-            _text += f"\n{_f_obj.get_current_text()}"
+        _text = f"JOIN {self.name} {self.number} OF\n"
+        _text += f"\n".join ([f" {_f_obj.get_current_text()}" for _f_obj in self._follows_collection])
         _text += f"\n{self._modified_end_text}"
         return _text
     

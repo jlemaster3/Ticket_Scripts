@@ -15,7 +15,7 @@ from ToolBox_V2 import *
 #-------------------------------------------------
 
 contract = 'MMS-VA'
-ticketNumber = 'RITM0221064'
+ticketNumber = 'RITM0231459'
 
 source_path = "C:\\Users\\jlemaster3\\source\\Workspaces\\Managed-Accounts\\MMS\\"
 # Define Working Directory
@@ -46,7 +46,7 @@ def Step_1 (sourcePath:str, outputPath:str, namedLists:dict[str, list[str]] = No
                 if ('stream_name' in _row.keys()) and ('job_name' in _row.keys()) and ('target_command' in _row.keys()):
                     _streamName = '_'.join(_row['stream_name'].split('_')[3:]).upper()
                     _jobName = _row['job_name'].upper()
-                    _docommand_changes[f"{_streamName}.{_jobName}"] = _row['target_command']
+                    _docommand_changes[f"{_streamName}.{_jobName}"] = rf"{_row['target_command']}"
                 else:
                     _missed_list.append(_row)
     log.info (f"Total number of DOCOMMAND target_values : [{len(_docommand_changes.keys())}]", data=_docommand_changes)

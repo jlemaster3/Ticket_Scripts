@@ -32,7 +32,7 @@ class ToolBox_IWS_Job_Obj (UserDict):
     _name:str = None
     _alias:str = None
     _workstation:str = None
-    _folder:str = None
+    _folder:str = None    
 
     _follows_collection:list[ToolBox_IWS_Follows_Obj | ToolBox_IWS_Join_Obj] = []
 
@@ -149,10 +149,8 @@ class ToolBox_IWS_Job_Obj (UserDict):
                 _cleaned_lines = [_line.strip() for _idx, _line in enumerate(_lines) if _idx not in _remove_list]
                 _follows_text = [_f_obj.get_current_text() for _f_obj in self._follows_collection]
                 for _i, _new_line in enumerate(_follows_text):
-                    _lines = _new_line.splitlines()
-                    _cleaned_line = '\n '.join([f"{_l.strip()}" for _l in _lines])
-                    _cleaned_lines.insert(_prev_id + _i,_cleaned_line)
-                _new_text = '\n '.join(_cleaned_lines)
+                    _cleaned_lines.insert(_prev_id + _i,_new_line)
+                _new_text = '\n'.join([_l.strip() for _l in _cleaned_lines])
                 self._modified_text = _new_text
 
     #------- properties -------#
@@ -227,7 +225,6 @@ class ToolBox_IWS_Job_Obj (UserDict):
                 _ouput = f"{_js_ws}/{_js_folder}/{_js_name}.{_j_name}"
             else:
                 _ouput = f"{self._workstation}{self._folder}{_j_name}"
-            
         return _ouput
     
     @property
@@ -281,13 +278,12 @@ class ToolBox_IWS_Job_Obj (UserDict):
             if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
                 _job_start_ids.append(_line_id)
         if (self.notes is None) or (self.notes.strip() == ''):
-            _holder = [line for line in value.splitlines() if line.strip() != '']
-            _holder.append('')
+            _holder = [f'{line}\n' for line in value.splitlines() if line.strip() != '']
             _holder.extend(_lines)
             self._modified_text = '\n'.join(_holder)
         else:
             _cur_notes:list[str] = self.notes.splitlines()
-            _new_notes:list[str] = [_l for _l in str(self._modified_text).splitlines()]
+            _new_notes:list[str] = [_l for _l in str(value).splitlines()]
             _overlap_count = 0
             _max_overlap = min(len(_cur_notes), len(_new_notes))
             for _i in range(1, _max_overlap + 1):
@@ -299,12 +295,13 @@ class ToolBox_IWS_Job_Obj (UserDict):
                     break  # stop at the first mismatch
             if _overlap_count >= 1:
                 _to_add = _new_notes[_overlap_count:]
-            else:
-                _to_add = _new_notes
-            _cur_notes.extend(_to_add)
-            _cur_notes.append('')
-            _new_lines = _cur_notes + _lines[min(_job_start_ids):]
-            self._modified_text = '\n'.join([_l for _l in _new_lines])
+                _cur_notes.extend(_to_add)
+            _new_text = '\n'.join(_cur_notes) + '\n\n'
+            _new_text += '\n'.join([_l.strip() for _l in _lines[min(_job_start_ids):]])
+            self._modified_text = _new_text
+            #_new_lines = _cur_notes + [f" {_l}" for _l in _lines[min(_job_start_ids):]]
+            #self._modified_text = '\n'.join([_l for _l in _new_lines])
+
             
     #------- Public Methods -------#
 
@@ -321,7 +318,16 @@ class ToolBox_IWS_Job_Obj (UserDict):
     def get_current_text(self) -> str:
         """Returns the current text of this Job."""
         self._update_follows_in_modified_text()
-        return self._modified_text
+        _new_lines = []
+        _job_start_id = -1
+        for _line_idx, _line in enumerate(self._modified_text.splitlines()):
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
+                _job_start_id = _line_idx
+            _new_lines.append(f"{_line.strip()}")
+        for _new_line_idx, _line in enumerate(_new_lines):
+            if _new_line_idx > _job_start_id and (_line[0] != ' '):
+                _new_lines[_new_line_idx] = f" {_line}"
+        return '\n'.join(_new_lines)
 
     @ToolBox_Decorator
     def reset_modfied_text (self):

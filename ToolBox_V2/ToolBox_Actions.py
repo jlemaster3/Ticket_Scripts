@@ -8,9 +8,6 @@ from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_JIL_File import ToolBox_IWS_JIL_Fi
 from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_Stream_Obj import ToolBox_IWS_Stream_Obj
 from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_Job_Obj import ToolBox_IWS_Job_Obj
 from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_Follows_Obj import ToolBox_IWS_Follows_Obj, ToolBox_IWS_Join_Obj
-from ToolBox_V2.ToolBox_Filters import (
-    is_IWS_asset
-)
 from typing import Any, Optional, List
 
 #-------------------------------------------------
@@ -221,7 +218,21 @@ def Action_IWS_JIL_sync_streams_A_B (
             _source_paths.append(_path)
         if target_filter.upper() in _path.upper():
             _target_paths.append(_path)
-    _matching_pairs:list[tuple[str,str]] = [(_sp,_tp) for _sp in _source_paths for _tp in _target_paths if _sp.replace(source_filter,'') == _tp.replace(target_filter, '')]
+    _matching_pairs:list[tuple[str,str]] = []
+    _missed_source_items:list[str] = []
+    _missed_target_items:list[str] = []
+    for _sp in _source_paths:
+        _sp_found:bool = False
+        _tp_found:bool = False
+        for _tp in _target_paths:
+            if _sp.replace(source_filter,'') == _tp.replace(target_filter, ''):
+                _matching_pairs.append((_sp,_tp))
+                _sp_found = True
+                _tp_found == True
+        if _sp_found == False and _sp not in _missed_source_items:
+            _missed_source_items.append(_sp)
+        if _tp_found == False and _sp not in _missed_target_items:
+            _missed_target_items.append(_sp)
     for _pair in _matching_pairs:
         _source_stream = file.get_Job_Stream_by_name(_pair[0])
         _target_stream = file.get_Job_Stream_by_name(_pair[1])

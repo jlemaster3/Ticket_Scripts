@@ -176,7 +176,7 @@ class OutputLogger(logging.Logger):
             except Exception:
                 # If serialization fails, just coerce to string
                 data_str = str(data)
-            message = f"{message} | {type(data)} - {data_str}"
+            message = rf"{message} | {type(data)} - {data_str}"
         self.log(level, message, *(), stacklevel=3, **kwargs)
         
     def debug(self, message, data=None, list_data_as_table:bool = False, column_count:int = 8, *args, **kwargs):
