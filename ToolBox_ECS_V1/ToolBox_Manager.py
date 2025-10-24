@@ -104,12 +104,12 @@ class ToolBox_Manager :
         return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_File_Node)]
     
     @property
-    def JIL_file_nodes (self) -> list[ToolBox_ECS_File_Node]:
+    def JIL_file_nodes (self) -> list[ToolBox_IWS_JIL_File_Node]:
         """Returns this a list of all *.jil or *.job File Nodes"""
         return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_JIL or _n.node_type == ToolBox_Entity_Types.FILE_JOB)]
 
     @property
-    def CSV_file_nodes (self) -> list[ToolBox_ECS_File_Node]:
+    def CSV_file_nodes (self) -> list[ToolBox_CSV_File_Node]:
         """Returns this a list of all *.csv Nodes"""
         return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_CSV)]
 
@@ -237,6 +237,7 @@ class ToolBox_Manager :
             fileName_AnyOrAll:ToolBox_Options = ToolBox_Options.ANY,
             isolate_formats: Optional[list[str]] = None,
             last_modified: Optional[datetime] = None,
+            skip_duplicates:bool = False
         ) -> list[ToolBox_ECS_File_Node]:
         """Loads any tracked File Nodes, if the file type is able to produce ToolBox_ECS_Nodes, they will be laoded into ToolBox."""
         _files = [_n for _n in self.file_nodes]
@@ -256,7 +257,7 @@ class ToolBox_Manager :
                 if (node_file_types is not None) and (not any(_node.node_type == _nt for _nt in node_file_types)):
                     continue
                 if hasattr(_node, 'open_file'):
-                    _node.open_file()
+                    _node.open_file(skip_duplicates = skip_duplicates)
                 else:
                     self.log.warning(f"Node ({type(_node)}) [{_node.id_key}] : {_node.name} is missing 'open_file()' method.")
                     continue

@@ -83,7 +83,7 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
     #------- Public Methods -------#
 
     @ToolBox_Decorator
-    def open_file (self, quite_logging:bool=False) -> str:
+    def open_file (self, quite_logging:bool=False, skip_duplicates=False) -> str:
         """Opens teh Jil file and loads the data as Node objects."""
         if self._is_open != True:
             try:
@@ -105,7 +105,7 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
             except Exception as e:
                 self.log.warning(f"An unexpected error occurred while reading '{self.sourceFilePath}': {e}")
         if self._is_open == True:
-            self.decode_source_text()
+            self.decode_source_text(skip_duplicates=skip_duplicates)
             self.convert_text_blocks_to_nodes()
         return self
     
@@ -151,17 +151,17 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
         return self
     
     @ToolBox_Decorator
-    def decode_source_text (self, source_text:str=None, quite_logging:bool=True):
+    def decode_source_text (self, source_text:str=None, quite_logging:bool=True, skip_duplicates:bool = False):
         """breaks the source text into seprate to blocks for further processing, while capturing links between blocks."""
         from ToolBox_ECS_V1.ToolBox_Manager import ToolBox
         if (quite_logging != True) : self.log.blank("-"*100)
         if (quite_logging != True) : self.log.label(f"Decoding IWS Object contents from source file : '{self.relFilePath}'")
         _source_text = source_text if source_text is not None else self._source_file_text
-        _last_text_block:dict[str,str] = None
-        _curr_text_block:dict[str,str] = None
+        _last_text_block:dict[str,Any] = None
+        _curr_text_block:dict[str,Any] = None
         _post_note_block:list[str] = []
-        _curr_stream_block:dict[str,str] = None
-        _curr_job_block:dict[str,str] = None
+        _curr_stream_block:dict[str,Any] = None
+        _curr_job_block:dict[str,Any] = None
         _curr_stream_workstation:str = None
         _curr_stream_folder:str = None
         _curr_stream_name:str = None
@@ -224,13 +224,15 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                     _curr_stream_full_path = f"{_curr_stream_workstation}{_curr_stream_folder}{_curr_stream_name}.@"
                     _curr_stream_key_string = f"{self._source_file_path}|{_curr_stream_full_path}"
                     _curr_stream_id_key = gen_uuid_key(_curr_stream_key_string)
-                    if _curr_stream_id_key in ToolBox:
+                    if (skip_duplicates == False) and _curr_stream_id_key in ToolBox:
                         _rand_key = str(random.randrange(1000000000))
                         _curr_text_block['data']["random_key"] = _rand_key
                         _curr_stream_key_string = f"{self._source_file_path}|{_curr_stream_full_path}|{_rand_key}"
                         _rand_curr_stream_id_key = gen_uuid_key(_curr_stream_key_string)
                         self.log.warning (f"Key [{_curr_stream_id_key}] was already assigned in ECS system, generating random key: [{_rand_curr_stream_id_key}]")
                         _curr_stream_id_key = _rand_curr_stream_id_key
+                    elif skip_duplicates == True:
+                        continue
                     _curr_text_block['data']['id_key'] = _curr_stream_id_key
                     _curr_text_block['data']['key_string'] = _curr_stream_key_string
                     _curr_text_block['data']['full_path'] = _curr_stream_full_path
@@ -239,8 +241,13 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                     _curr_stream_index += 1
                 continue
             # Marks a line as a FOLLOWS line and marks it for being created as a seprate node.
-            if re.match(ToolBox_REGEX_Patterns.IWS_FOLLOWS_LINE, _line, re.IGNORECASE):
-                _owning_block = _curr_stream_block if _curr_job_block is None else _curr_job_block
+            if re.match(ToolBox_REGEX_Patterns.IWS_FOLLOWS_LINE, _line, re.IGNORECASE) and (_curr_text_block is not None) and ((_curr_stream_block is not None) or (_curr_job_block is not None)):
+                _owning_block = _curr_text_block
+                if (_owning_block is None) or (
+                    ('data' not in _owning_block.keys()) or 
+                    ('full_path' not in _owning_block['data'].keys()) or
+                    ('id_kay' not in _owning_block['data'].keys())
+                ): continue
                 _follow_target_parts = re.search(ToolBox_REGEX_Patterns.IWS_FOLLOWS_LINE, _line, re.IGNORECASE)
                 _follows_target_ws = _follow_target_parts.group(1)
                 _follows_target_path = _follow_target_parts.group(2)
@@ -293,13 +300,15 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                     _curr_job_full_path += _curr_job_alias if _job_parts_results.group(5) else _curr_job_name
                     _curr_job_key_string = f"{self._source_file_path}|{_curr_job_full_path}"
                     _curr_job_id_key = gen_uuid_key(_curr_job_key_string)
-                    if _curr_job_id_key in ToolBox:
+                    if (skip_duplicates == False) and _curr_job_id_key in ToolBox:
                         _rand_key = str(random.randrange(1000000000))
                         _curr_text_block['data']["random_key"] = _rand_key
                         _curr_job_key_string = f"{self._source_file_path}|{_curr_job_full_path}|{_rand_key}"
                         _rand_curr_job_id_key = gen_uuid_key(_curr_job_key_string)
                         self.log.warning (f"Key [{_curr_job_id_key}] was already assigned in ECS system, generating random key: [{_rand_curr_job_id_key}]")
                         _curr_job_id_key = _rand_curr_job_id_key
+                    elif skip_duplicates == True:
+                        continue
                     _curr_text_block['data']['id_key'] = _curr_job_id_key
                     _curr_text_block['data']['key_string'] = _curr_job_key_string
                     _curr_text_block['data']['full_path'] = _curr_job_full_path
@@ -359,7 +368,7 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
             elif (_line.strip() != ''):
                 _post_note_block.append(_line)
         # Add any post notes to last block in stack.
-        if len(_post_note_block) >= 1:
+        if len(self._blocks) >= 1 and len(_post_note_block) >= 1:
             if '"post_notes"' not in self._blocks[-1].keys():
                 self._blocks[-1]["post_notes"] = []
             self._blocks[-1]["post_notes"].extend(_post_note_block)
