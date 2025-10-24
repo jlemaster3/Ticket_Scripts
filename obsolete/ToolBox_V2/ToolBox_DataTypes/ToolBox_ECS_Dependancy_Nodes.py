@@ -28,6 +28,11 @@ def ToolBox_Decorator(func):
 #-------------------------------------------------
 
 class ToolBox_ECS_Dependency (ToolBox_ECS_Node):
+    """Extends from ToolBox_ECS_Node
+    
+    This Node tpye is ment to handle unique relationships between otehr nodes that extends outside the
+    basic "Parent-Child" hierarchy and relationships that most node trees would impliment.
+    """
     #------- public properties -------#
 
     log:OutputLogger = OutputLogger().get_instance()
@@ -81,10 +86,16 @@ class ToolBox_ECS_Dependency (ToolBox_ECS_Node):
 #   Defined Node Classes
 #-------------------------------------------------
 
-# IWS Generic Object node, handles all IWS node types by the node_type value defined.
-# Extends from ToolBox_ECS_Node.
+# IWS Connection node, handles and stores all information about a links between IWS nodes.
+# This node type is meant to track and manage all non-"Parent to Child" or non-"Job Stream to Job".
+# Extends from ToolBox_ECS_Dependency.
 
 class ToolBox_ECS_Node_IWS_Dependancy (ToolBox_ECS_Dependency):
+    """Extends from ToolBox_ECS_Dependency.
+    
+    IWS Connection node, handles and stores information about a links between IWS nodes,
+    not meant to be used for "Parent to Child" or non-"Job Stream to Job" hierarchy.
+    """
     #------- public properties -------#
 
     log:OutputLogger = OutputLogger().get_instance()
@@ -101,7 +112,7 @@ class ToolBox_ECS_Node_IWS_Dependancy (ToolBox_ECS_Dependency):
     def __init__(
         self,
         id_key:str,
-        object_type:ToolBox_Entity_types.IWS_FOLLOW | ToolBox_Entity_types.IWS_JOIN,
+        object_type:ToolBox_Entity_types.IWS_FOLLOW | ToolBox_Entity_types.IWS_JOIN | ToolBox_Entity_types.IWS_RESOURCE,
         name:str = None,
         parent_entitity:Optional[ToolBox_ECS_Node]=None, 
         initial_data:dict[str,Any]=None
@@ -114,3 +125,5 @@ class ToolBox_ECS_Node_IWS_Dependancy (ToolBox_ECS_Dependency):
             initial_data = initial_data
         )
         self._iws_object_type = object_type
+
+

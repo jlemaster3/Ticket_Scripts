@@ -33,40 +33,49 @@ def Step_1 (sourcePath:str, outputPath:str, namedLists:dict[str, list[str]] = No
     )
     log.blank("-"*100)
     log.info(f"Search Terms -> Replace Terms : [{len(namedLists['Search_Replace'].keys())}]", data = namedLists['Search_Replace'])
+    log.info(f"Workstation Swap Terms -> Replace Terms : [{len(namedLists['Workstation_Swap'].keys())}]", data = namedLists['Workstation_Swap'])
     _ws_list = list(namedLists['Workstation_Swap'].keys())
     log.info(f"Limiting edits to Job Streams and Jobs that are on Workstations : [{len(_ws_list)}]", data=_ws_list, list_data_as_table=True, column_count=1)
     _updated_file_count = 0
-    _file_to_duplciate_streams = []
+    _file_to_duplciate_streams:dict[str,ToolBox_IWS_JIL_File] = {}
     for _file in _filelist:
         if isinstance(_file, ToolBox_IWS_JIL_File):
             _file.open_file()
             for _search in namedLists['Workstation_Swap'].keys():
-                _file_to_duplciate_streams.append(_file)
-    for _dup_file in _file_to_duplciate_streams:
+                if _file.relFilePath not in _file_to_duplciate_streams.keys():
+                    _file_to_duplciate_streams[_file.relFilePath] = _file
+    _file_updated:bool = False
+    for _coutner, _dup_file in enumerate(_file_to_duplciate_streams.values()):
         if isinstance(_dup_file, ToolBox_IWS_JIL_File):
             _dup_file.open_file()
             log.blank("-"*100)
-            log.info(f"Processing File '{_dup_file.relFilePath}'")
-            _file_updated:bool = False
+            log.info(f"[{_coutner}]Processing File '{_dup_file.relFilePath}'")
+            _file_updated = False
             for _source_ws, _target_ws in namedLists["Workstation_Swap"].items():
                 Action_IWS_JIL_duplicate_streams(_dup_file, _source_ws, _target_ws)
-                _file_updated = True
             for _stream in _dup_file.job_stream_objects:
                 if '@APP2#' in _stream.full_path.upper():
+                    for _search, _replace in namedLists['Search_Replace'].items():
+                        _stream.search_replace_text(_search, _replace)
+                    for _source_ws, _target_ws in namedLists["Workstation_Swap"].items():
+                            _stream.search_replace_text(_source_ws, _target_ws)
+                    if _stream._source_text != _stream._modified_text:
+                        _file_updated = True
                     for _job in _stream.job_objects:
                         for _source_ws, _target_ws in namedLists["Workstation_Swap"].items():
                             _job.search_replace_text(_source_ws, _target_ws)
-                            _file_updated = True
+                            
                         for _search, _replace in namedLists['Search_Replace'].items():
                             _job.search_replace_text(_search, _replace)
+                        if _job._source_text != _job._modified_text:
                             _file_updated = True
-
             if (_file_updated == True):
                 _dup_file.save_File(outputFolder=outputPath, useRelPath=True)
                 _updated_file_count += 1
+                _file_updated = False
             else:
                 log.info (f"No workstation reference or search & replace reference found in file, no changes made, closing file.")
-            _file.close_file()
+            _dup_file.close_file()
     log.blank("-"*100)
     log.info(f"Total number of files changed : [{_updated_file_count}]")
 
@@ -97,7 +106,7 @@ if __name__ == "__main__":
             "Search_Replace" : {
                 "/export/home/dsor" : "/home/dsor",
                 "/export/customer/dsor" : "/dsor",
-                "/export/ftp/dsor/uat" : "dsor/{ENV}/ftp"
+                "/export/ftp/dsor/uat" : "dsor/{ENV_DIR}/ftp"
             }
         }
     )

@@ -28,8 +28,9 @@ def Action_IWS_JIL_duplicate_streams (file:ToolBox_IWS_JIL_File, sourceFilter:st
 
     for _stream in _source_stream_paths:
         _new_stream = copy.deepcopy (_stream)
+        _new_stream.search_replace_text(sourceFilter, targetFilter, quite_logging=True)
+        _new_stream._workstaion = targetFilter
         log.debug (f"Duplicated Stream '{_stream.full_path}' and renamed to '{_new_stream.full_path}'")
-        _new_stream.search_replace_text(sourceFilter, targetFilter)
         if all ([_new_stream.full_path != _js.full_path for _js in file._jobStream_collection]):
             file._jobStream_collection.append(_new_stream)
 

@@ -149,7 +149,8 @@ class ToolBox_ECS_IWS_JIL_Parser:
     @ToolBox_Decorator
     def decode_source_text (self, source_text:str=None):
         """breaks the source text into seprate to blocks for further processing, while capturing links between blocks."""
-        self.log.info(f"Decoding IWS Object contents from source file : '{self._source_file.relFilePath}'")
+        self.log.blank("-"*100)
+        self.log.label(f"Decoding IWS Object contents from source file : '{self._source_file.relFilePath}'")
         _source_text = source_text if source_text is not None else self._source_text
         _last_text_block:dict[str,str] = None
         _curr_text_block:dict[str,str] = None
@@ -171,13 +172,13 @@ class ToolBox_ECS_IWS_JIL_Parser:
         _total_job_counter:int = 0
         _curr_stream_index:int = 0
         _curr_job_index:int = 0
+        _curr_follows_index:int = 0
 
         self._blocks.clear()
 
         def finalize_block ():
             nonlocal _curr_text_block
             if _curr_text_block is not None:
-                
                 self._blocks.append(_curr_text_block)
                 nonlocal _last_text_block
                 _last_text_block = self._blocks[-1]
@@ -231,6 +232,38 @@ class ToolBox_ECS_IWS_JIL_Parser:
                     _curr_text_block['data']['stream_order_index'] = _curr_stream_index
                     _total_stream_counter += 1
                     _curr_stream_index += 1
+                continue
+            # Marks a line as a FOLLOWS line and marks it for being created as a seprate node.
+            if re.match(ToolBox_REGEX_Patterns.IWS_FOLLOWS_LINE, _line, re.IGNORECASE):
+                _owning_block = _curr_stream_block if _curr_job_block is None else _curr_job_block
+                _follow_target_parts = re.search(ToolBox_REGEX_Patterns.IWS_FOLLOWS_LINE, _line, re.IGNORECASE)
+                _follows_target_ws = _follow_target_parts.group(1)
+                _follows_target_path = _follow_target_parts.group(2)
+                _follows_target_stream = _follow_target_parts.group(3)
+                _follows_target_job = _follow_target_parts.group(5) if _follow_target_parts.group(5) else _follow_target_parts.group(4)
+                _target_full_path = None
+                if _follow_target_parts.group(5) is not None:
+                    _target_full_path = f"{_curr_stream_workstation}{_curr_stream_folder}{_curr_stream_name}.{_follows_target_job}"
+                else:
+                    _target_full_path = f"{_follows_target_ws}{_follows_target_path}{_follows_target_stream}.{_follows_target_job}"
+                _follows_key_string = f"{self._source_file._source_path}|{_target_full_path}|{_owning_block['data']['full_path']}"
+                _follows_id_key = gen_uuid_key(_curr_stream_key_string)
+                _follows_block = {
+                    "type":ToolBox_Entity_types.IWS_FOLLOW,
+                    "notes": [],
+                    "content":[_line.rstrip()],
+                    "data": {
+                        'id_key' : _follows_id_key,
+                        'key_string' : _follows_key_string,
+                        'soure_key' : _target_full_path,
+                        'target_key' : _owning_block['data']['id_key'],
+                        'parent_path' : _owning_block['data']['full_path'],
+                        'parent_key' : _owning_block['data']['id_key'],
+                        'follow_order_index' : _curr_follows_index,
+                    }
+                }
+                _curr_follows_index += 1
+                self._blocks.append(_follows_block)
                 continue
             # Edge line of the current Stream Block marked by ':' in source text.
             # Adds the line to the current block, then closes current block.
@@ -332,6 +365,7 @@ class ToolBox_ECS_IWS_JIL_Parser:
         if len(self._blocks) >= 1:
             _stream_blocks = []
             _job_blocks = []
+            _follow_blocks = []
             _other_blocks = []
             # split blocks into Groups for ordered processing
             for _idx in range(len(self._blocks)):
@@ -340,12 +374,20 @@ class ToolBox_ECS_IWS_JIL_Parser:
                     _stream_blocks.append(self._blocks[_idx])
                 elif _curr_block_type == ToolBox_Entity_types.IWS_JOB:
                     _job_blocks.append(self._blocks[_idx])
+                elif _curr_block_type == ToolBox_Entity_types.IWS_FOLLOW:
+                    _follow_blocks.append(self._blocks[_idx])
                 else:
                     _other_blocks.append(self._blocks[_idx])
+            self.log.info(f"Total Stream Blocks Found : [{len(_stream_blocks)}]")
+            self.log.info (f"Total Job Blocks Found : [{len(_job_blocks)}]")
+            self.log.info (f"Total Follows Blocks Found : [{len(_follow_blocks)}]")
+            if len(_other_blocks) >= 1:
+                self.log (f"Total Blocks unable to filter : [{len(_other_blocks)}]")
+
             # Process all Job Stream Blocks
             for _streamBlock in _stream_blocks:
                 _curr_stream_type:ToolBox_Entity_types = _streamBlock['type']
-                _curr_stream_notes:str = '\n'.join([_l.rstrip() for _l in _streamBlock['notes']]) if len(_streamBlock['notes']) >= 1 else None
+                _curr_stream_notes:str = '\n'.join([_l.rstrip() for _l in _streamBlock['notes']]) if len(_streamBlock['notes']) != 0 else None
                 _curr_stream_content:str = '\n'.join(_l.rstrip() for _l in _streamBlock['content'])    
                 _curr_stream_data:dict[str,Any] = _streamBlock['data']
                 _curr_stream_node = ToolBox_ECS_Node_IWS_Obj(
@@ -355,7 +397,7 @@ class ToolBox_ECS_IWS_JIL_Parser:
                     initial_data = _curr_stream_data
                 )
                 _curr_stream_node.sourceFile_Object = self._source_file
-                _curr_stream_node.sourceFile_Text = f"{_curr_stream_notes}\n\n{_curr_stream_content}"
+                _curr_stream_node.sourceFile_Text = (f"{_curr_stream_notes}\n\n"if _curr_stream_notes is not None else "")+ _curr_stream_content
                 _curr_stream_post_notes:str = '\n'.join([_l.rstrip() for _l in _streamBlock['post_notes']]) if 'post_notes' in _streamBlock.keys() else None
                 if _curr_stream_post_notes is not None:
                     _curr_stream_node.sourceFile_Text += f'\n\n{_curr_stream_post_notes}'
@@ -366,7 +408,7 @@ class ToolBox_ECS_IWS_JIL_Parser:
             # Process all Job Stream Blocks
             for _jobBlock in _job_blocks:
                 _curr_job_type:ToolBox_Entity_types = _jobBlock['type']
-                _curr_job_notes:str = '\n'.join([_l.rstrip() for _l in _jobBlock['notes']]) if len(_jobBlock['notes']) >= 1 else None
+                _curr_job_notes:str = '\n'.join([_l.rstrip() for _l in _jobBlock['notes']]) if len(_jobBlock['notes']) != 0 else None
                 _curr_job_content:str = '\n'.join(_l.rstrip() for _l in _jobBlock['content'])    
                 _curr_job_data:dict[str,Any] = _jobBlock['data']
                 _curr_job_node = ToolBox_ECS_Node_IWS_Obj(
@@ -376,10 +418,10 @@ class ToolBox_ECS_IWS_JIL_Parser:
                     initial_data = _curr_job_data
                 )
                 _curr_job_node.sourceFile_Object = self._source_file
-                _curr_job_node.sourceFile_Text = f"{_curr_job_notes}\n\n{_curr_job_content}"
-                _curr_job_notes:str = '\n'.join([_l.rstrip() for _l in _jobBlock['post_notes']]) if 'post_notes' in _jobBlock.keys() else None
-                if _curr_job_notes is not None:
-                    _curr_job_node.sourceFile_Text += f'\n\n{_curr_job_notes}'
+                _curr_job_node.sourceFile_Text = (f"{_curr_job_notes}\n\n"if _curr_job_notes is not None else "")+ _curr_job_content
+                _curr_job_post_notes:str = '\n'.join([_l.rstrip() for _l in _jobBlock['post_notes']]) if 'post_notes' in _jobBlock.keys() else None
+                if _curr_job_post_notes is not None:
+                    _curr_job_node.sourceFile_Text += f'\n\n{_curr_job_post_notes}'
                 _curr_job_node.sourceFile_Object = self._source_file
                 _curr_job_node.sourceFile_Path = self._source_file.sourceFilePath    
                 self.log.debug (f"Adding Node :'{_curr_job_node.object_type}' defined in file '{_curr_job_node.sourceFile_Object.relFilePath}' as '{_curr_job_node.full_path}'")#, data=_curr_job_node._source_file_text.splitlines(), list_data_as_table=True, column_count=1 )

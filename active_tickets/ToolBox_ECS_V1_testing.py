@@ -8,7 +8,7 @@ from datetime import datetime as dt
 _curr_dir = os.path.dirname(os.path.abspath(__file__))
 _prnt_dir = os.path.dirname(_curr_dir)
 sys.path.append(_prnt_dir)
-from ToolBox_V2 import *
+from ToolBox_ECS_V1 import *
 
 #-------------------------------------------------
 #   Variables
@@ -27,8 +27,6 @@ working_directory = os.path.join ("C:\\Users\\jlemaster3\\OneDrive - Gainwell Te
 #-------------------------------------------------
 
 
-
-
 #-------------------------------------------------
 #   Initialize Script
 #-------------------------------------------------
@@ -39,30 +37,26 @@ if __name__ == "__main__":
     log.init_logger(log_folder=working_directory, log_file=f"{contract}_{ticketNumber}_{_start_time.strftime('%Y%m%d')}.log")
     log.critical(f"Starting log for ticket : {ticketNumber} under contract : {contract}")
 
-    _file_list = ToolBox_Gather_Files(
+    _file_list = ToolBox.collect_files_as_nodes(
         source_dir = source_path,
-        #isolate_directory_names= ['prod'],
+        isolate_directory_names= ['prod'],
         isolate_fileName_names = ["Temp_test"],
-        isolate_formats=['jil','job'],
+        isolate_formats=['jil','job']
     )
     log.info (f"Total files found:[{len(_file_list)}]")
-    dataECS.import_file_list(_file_list)
-    _nodes_by_files = dataECS.get_IWS_nodes_by_file()
-    _total = sum([len(_list) for _list in _nodes_by_files.values()])
+    ToolBox.load_file_nodes()
     log.blank('-'*100)
-    log.info (f"Total Nodes being tracked :[{_total}]")
-    for _file_idx, (filePath, nodeList) in enumerate(_nodes_by_files.items()):
-        log.blank('-'*75)
-        log.label (f"[{_file_idx}] - File : '{filePath}' nodes :")
-        for _node_idx, node in enumerate(nodeList):
-            if isinstance(node, ToolBox_ECS_Node_IWS_Obj) and (node.node_type == ToolBox_Entity_types.IWS_JOBSTREAM):
-                log.debug (f"[{_file_idx}:{_node_idx}:{0}] - {node.full_path}", data=f"\n{node.format_as_Job_Stream(include_notes=False, include_jobs=False, include_end=False)}")
-                #for _job_idx, _job in enumerate([_c for _c in node.children if isinstance(_c, ToolBox_ECS_Node_IWS_Obj) and _c.node_type == ToolBox_Entity_types.IWS_JOB]):
-                #    log.debug (f"[{_file_idx}:{_node_idx}:{_job_idx+1}] - {_job.full_path}", data=f"\n{_job.format_as_Job()}")
-                
+    log.info (f"Total Nodes being Tracked :[{len(ToolBox)}]")
+    log.blank('-'*100)
 
-                
-    log.blank('-'*100)
+    for _stream in ToolBox.IWS_Job_Stream_nodes:
+        log.info (f"{_stream.full_path}", data=_stream.format_as_Job_Stream(
+            indent=0,
+            include_notes=False,
+            include_jobs=False,
+            include_end=False
+        ), list_data_as_table=True, column_count=1)
+
     log.critical(f"End of log for ticket : {ticketNumber} under contract : {contract}")
     log .info (f"Script processing time : {dt.now() - _start_time}")
     print ("Complete.")

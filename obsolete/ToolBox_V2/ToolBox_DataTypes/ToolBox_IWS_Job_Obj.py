@@ -5,9 +5,8 @@ import os, re
 from datetime import datetime
 from collections import UserDict
 from typing import Any
-from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_Job_Obj import ToolBox_IWS_Job_Obj
-from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_Follows_Obj import ToolBox_IWS_Follows_Obj, ToolBox_IWS_Join_Obj
 from ToolBox_V2.ToolBox_logger import OutputLogger
+from ToolBox_V2.ToolBox_DataTypes.ToolBox_IWS_Follows_Obj import ToolBox_IWS_Follows_Obj, ToolBox_IWS_Join_Obj
 #-------------------------------------------------
 #   Decorator Functions / Wrappers
 #-------------------------------------------------
@@ -22,30 +21,28 @@ def ToolBox_Decorator(func):
 #   Classes
 #-------------------------------------------------
 
-class ToolBox_IWS_Stream_Obj (UserDict):
+class ToolBox_IWS_Job_Obj (UserDict):
     """Data Class representing and handing IWS Job Stream actions"""
     log:OutputLogger = OutputLogger().get_instance()
     _source_file:str = None
     _source_text:str = None
-    _source_end_text:str = None
     _modified_text:str = None
-    _modified_end_text:str = None
+    _parent_path:str = None
     _defined_path:str = None
     _name:str = None
-    _workstaion:str = None
-    _folder:str = None
+    _alias:str = None
+    _workstation:str = None
+    _folder:str = None    
 
-    _job_collection:list[ToolBox_IWS_Job_Obj] = []
-    _follows_collection:list[ToolBox_IWS_Follows_Obj|ToolBox_IWS_Join_Obj] = []
+    _follows_collection:list[ToolBox_IWS_Follows_Obj | ToolBox_IWS_Join_Obj] = []
 
-    def __init__(self, definition_text:str, end_text:str=None, sourceFile:str=None, initial_data:dict[str,Any]=None):
+    def __init__(self, definition_text:str, sourceFile:str=None, parent_path:str=None, initial_data:dict[str,Any]=None):
         super().__init__(initial_data)
         self._source_file = sourceFile
         self._source_text = definition_text
-        self._source_end_text = end_text
         self._modified_text = self._source_text
-        self._modified_end_text = self._source_end_text
-        self._job_collection = []
+        self._parent_path = parent_path
+        self._follows_collection = []
         self._reset_values_from_modified_text()
 
     
@@ -59,33 +56,31 @@ class ToolBox_IWS_Stream_Obj (UserDict):
     def __getitem__(self, key):
         if isinstance(key, str):
             key = key
-        return self.data[key] 
+        return self.data[key]
+    
 
     #------- private methods -------#
 
     @ToolBox_Decorator
     def _reset_values_from_modified_text (self):
-        """collects values from the current state of the Job Stream Modified text."""
-        _lines = str(self._modified_text).splitlines()
-        _stream_start_ids:list[int] = []
-        _stream_edge_ids:list[int] = []
-        _stream_end_ids:list[int] = []
+        """collects instal values form teh current state of teh job stream definition text."""
+        _job_start_ids:list[int] = []
+        _lines = self._modified_text.splitlines()
         for _line_id, _line in enumerate(_lines):
-            if "SCHEDULE" in str(_line).strip()[0:9]:
-                _stream_start_ids.append(_line_id)
-            if ':' in _line[0:2]:
-                _stream_edge_ids.append(_line_id)
-            if "END" in str(_line).strip()[0:4] and 'ENDJOIN' not in str(_line).strip():
-                _stream_end_ids.append(_line_id)
-        for _id_index in range(len(_stream_start_ids)):
-            _line = _lines[_stream_start_ids[_id_index]]
-            self._defined_path = str(_line.split(' ')[1])
-            _js_parts = self._defined_path.split('/')
-            self._workstaion = _js_parts.pop(0)
-            self._name = _js_parts.pop(-1)
-            self._folder = f"/{'/'.join(_js_parts)}/"
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
+                _job_start_ids.append(_line_id)
+        for _i in range(len(_job_start_ids)):
+            _line = _lines[_job_start_ids[_i]]
+            self._jobPath = _line.strip().split(' ')[0]
+            _j_parts = self._jobPath.split('/')
+            self._workstation = _j_parts.pop(0)
+            self._name = _j_parts.pop(-1)
+            self._folder = f"/{'/'.join(_j_parts)}/"
+            _alias_index = _line.find(" AS ")
+            self._alias = _line[_alias_index+3:].strip().split(' ')[0] if _alias_index != -1 else None
         self._reset_dependancies_from_modified_text()
-    
+
+
     @ToolBox_Decorator
     def _reset_dependancies_from_modified_text (self):
         """Collects dependancies from the current state of the Job Stream Modified text."""
@@ -133,10 +128,9 @@ class ToolBox_IWS_Stream_Obj (UserDict):
                 )
                 self._follows_collection.append(_new_follow)
 
-        
     @ToolBox_Decorator
     def _update_follows_in_modified_text (self):
-        """Collects dependancies from the current state of the Job Stream Modified text."""
+        """Collects dependancies from the current state of the Job Modified text."""
         if len(self._follows_collection) != 0:
             _lines = str(self._modified_text).splitlines()
             _follows_ids:list[int] = []
@@ -152,11 +146,11 @@ class ToolBox_IWS_Stream_Obj (UserDict):
             _remove_list:list[int] = _follows_ids + _join_ids +_endjoin_ids
             if len (_remove_list) != 0 :
                 _prev_id = min(_remove_list)
-                _cleaned_lines = [_line for _idx, _line in enumerate(_lines) if _idx not in _remove_list]
+                _cleaned_lines = [_line.strip() for _idx, _line in enumerate(_lines) if _idx not in _remove_list]
                 _follows_text = [_f_obj.get_current_text() for _f_obj in self._follows_collection]
                 for _i, _new_line in enumerate(_follows_text):
-                    _cleaned_lines.insert(_prev_id + _i, _new_line)
-                _new_text = '\n'.join(_cleaned_lines)
+                    _cleaned_lines.insert(_prev_id + _i,_new_line)
+                _new_text = '\n'.join([_l.strip() for _l in _cleaned_lines])
                 self._modified_text = _new_text
 
     #------- properties -------#
@@ -164,12 +158,12 @@ class ToolBox_IWS_Stream_Obj (UserDict):
     @property
     def workstaion (self) -> str:
         """Returns assigned Job Stream Name as stored in IWS."""
-        return self._name
+        return self._workstation
     
     @workstaion.setter
     def workstaion (self, value:str) :
         """Sets the value of the assigned Workstaion."""
-        self._workstaion = value
+        self._workstation = value
 
     @property
     def folder (self) -> str:
@@ -183,76 +177,110 @@ class ToolBox_IWS_Stream_Obj (UserDict):
 
     @property
     def name (self) -> str:
-        """Returns assigned Job Stream Name as stored in IWS."""
+        """Returns assigned Job Name as stored in IWS."""
         return self._name
     
     @name.setter
     def name (self, value:str) :
-        """Sets the value of the Job Stream Name."""
+        """Sets the value of the Job Name."""
         self._name = value
-    
-    @property
-    def full_path (self) -> str:
-        """Returns the full path of the Job Stream as shown in IWS when viewed in a schedule.
-        format: {workstation}/{folderPath}/{jobStreamName}.@
-        """
-        return f"{self._workstaion}{self._folder}{self._name}.@"
-    
-    @property
-    def job_objects (self) -> list[ToolBox_IWS_Job_Obj]:
-        """Returns a list of Job Objects contained in this Job Stream Object"""
-        return self._job_collection
-    
-    @property
-    def job_paths (self) -> list[str]:
-        """Returns a list of Job paths found in this Job Stream Object."""
-        return [_j.full_path for _j in self._job_collection]
-    
-    @property
-    def job_data (self) -> dict[str, ToolBox_IWS_Job_Obj]:
-        """Returns a dictionary of Job Paths and Job Objects as key value pairs."""
-        _holder = {}
-        for _job in self._job_collection:
-            _holder[_job.full_path] = _job
-        return _holder
 
     @property
+    def alias (self) -> str:
+        """Returns assigned Job Stream as stored in IWS."""
+        return self._alias
+    
+    @alias.setter
+    def alias (self, value:str|None) :
+        """Sets the value of the Job Alias."""
+        self._alias = value
+    
+    @property
+    def parent_path (self) -> str:
+        """Returns assigned Job Stream Parent Path as stored in IWS."""
+        return self._parent_path
+
+    @parent_path.setter
+    def parent_path (self, path:str):
+        """Sets the Parent Path"""
+        if (path is not None or path.strip() != '') and (self._parent_path.upper() != path.upper()):
+            self._parent_path = path
+
+    @property
+    def full_path (self) -> str:
+        """Returns the full path of the Job as shown in IWS when viewed in a schedule.
+        If the Job Alias has been set, the Alias will be used in place of the Name.
+        format: {workstation}/{folderPath}/{jobStreamName}.{jobName}
+        """
+        _ouput = None
+        if (self.parent_path is None):
+            _ouput = f"{self._workstation}{self._folder}{self._name}"
+        else:
+            _js_parts = list(self.parent_path.split('/'))
+            _js_ws = _js_parts.pop(0)
+            _js_name = _js_parts.pop(-1).replace('.@','').strip()
+            _js_folder = '/'.join(_js_parts)
+            _j_name = self._name if (self._alias is None) or (self._alias.strip() == '') else self._alias
+            if (_js_ws.upper() in self._workstation.upper()) and (_js_folder.upper() in self._folder.upper()):
+                _ouput = f"{_js_ws}/{_js_folder}/{_js_name}.{_j_name}"
+            else:
+                _ouput = f"{self._workstation}{self._folder}{_j_name}"
+        return _ouput
+    
+    @property
     def follows_list (self) -> list[ToolBox_IWS_Follows_Obj|ToolBox_IWS_Join_Obj]:
-        """Returns the list of follows and join objects found in this Job Stream"""
+        """Returns the list of follows and join objects found in this Job"""
         return self._follows_collection
+    
+    @property
+    def DOCOMMAND(self) -> str:
+        """Returns assigned Target Job Stream or Job Path this dependency is looking for."""
+        _pattern = r"^.*?DOCOMMAND(.*)$"
+        _match = re.search(_pattern, self._modified_text, re.MULTILINE|re.IGNORECASE)
+        if _match:
+            return _match.group(1)
+        return None
+    
+    @DOCOMMAND.setter
+    def DOCOMMAND(self, value:str):
+        """Sets the DOCOMMAND quoted value in the Job text."""
+        _pattern = re.compile(r'(DOCOMMAND\s+)("(?:(?:\\.|[^"\\])*)")', re.IGNORECASE | re.MULTILINE)
+        _replace = value.replace('"','\\"')
+        # Use a lambda so replace_value is inserted literally
+        self._modified_text = _pattern.sub(lambda m: m.group(1) + rf'"{_replace}"', self._modified_text)
     
     @property
     def notes (self) -> str:
         _lines = str(self._modified_text).splitlines()
         _note_line_ids:list[int] = []
-        _stream_start_ids:list[int] = []
+        _job_start_ids:list[int] = []
         for _line_id, _line in enumerate(_lines):
-            if "SCHEDULE" in str(_line).strip()[0:9]:
-                _stream_start_ids.append(_line_id)
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
+                _job_start_ids.append(_line_id)
             if '#' in str(_line).strip()[0:4]:
                 _note_line_ids.append(_line_id)
         _holder = []
-        for _id_index in range(len(_stream_start_ids)):
+        for _id_index in range(len(_job_start_ids)):
             for _id in range(len(_note_line_ids)):
-                if _note_line_ids[_id] < _stream_start_ids[_id_index]:
+                if _note_line_ids[_id] < _job_start_ids[_id_index]:
                     _holder.append(_lines[_note_line_ids[_id]])
         if len(_holder) >= 1:
             return '\n'.join (_holder)
         else:
             return None
-        
+    
     @notes.setter
     def notes (self, value:str) :
-        """Sets or adds notes to end of current notes found above Job Stream definition"""
+        """Sets or adds notes to end of current notes found above Job definition"""
         _lines = str(self._modified_text).splitlines()
-        _stream_start_ids:list[int] = []
+        _job_start_ids:list[int] = []
         for _line_id, _line in enumerate(_lines):
-            if "SCHEDULE" in str(_line).strip()[0:9]:
-                _stream_start_ids.append(_line_id)
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
+                _job_start_ids.append(_line_id)
         if (self.notes is None) or (self.notes.strip() == ''):
-            _holder = [line.strip() for line in value.splitlines() if line.strip()]
+            _holder = [f'{line}\n' for line in value.splitlines() if line.strip() != '']
             _holder.extend(_lines)
-            self._modified_text = '\n'.join([_l for _l in _holder])
+            self._modified_text = '\n'.join(_holder)
         else:
             _cur_notes:list[str] = self.notes.splitlines()
             _new_notes:list[str] = [_l for _l in str(value).splitlines()]
@@ -269,73 +297,58 @@ class ToolBox_IWS_Stream_Obj (UserDict):
                 _to_add = _new_notes[_overlap_count:]
                 _cur_notes.extend(_to_add)
             _new_text = '\n'.join(_cur_notes) + '\n\n'
-            _new_text += '\n '.join(_lines[min(_stream_start_ids):])
+            _new_text += '\n'.join([_l.strip() for _l in _lines[min(_job_start_ids):]])
             self._modified_text = _new_text
-
-            #if _overlap_count >= 1:
-            #    _to_add = _new_notes[_overlap_count:]
-            #else:
-            #    _to_add = _new_notes
-            #_cur_notes.extend(_to_add)
-            #_new_lines = _cur_notes + _line[min(_stream_start_ids):]
+            #_new_lines = _cur_notes + [f" {_l}" for _l in _lines[min(_job_start_ids):]]
             #self._modified_text = '\n'.join([_l for _l in _new_lines])
-    
+
+            
     #------- Public Methods -------#
-    
+
     @ToolBox_Decorator
     def clear_all_stream_notes (self) :
         _lines = str(self._modified_text).splitlines()
-        _stream_start_ids:list[int] = []
+        _job_start_ids:list[int] = []
         for _line_id, _line in enumerate(_lines):
-            if "SCHEDULE" in str(_line).strip()[0:9]:
-                _stream_start_ids.append(_line_id)
-        self._modified_text = '\n'.join(_line[min(_stream_start_ids):])
-
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
+                _job_start_ids.append(_line_id)
+        self._modified_text = '\n'.join(_line[min(_job_start_ids):])
+    
     @ToolBox_Decorator
     def get_current_text(self) -> str:
-        """Returns the current Job Stream text including sub job definitions."""
+        """Returns the current text of this Job."""
         self._update_follows_in_modified_text()
-        _textHolder = self._modified_text + '\n'
-        _textHolder += "\n\n\n".join([_job.get_current_text() for _job in self._job_collection])
-        _textHolder += ("\n\n") 
-        _textHolder += self._modified_end_text
-        _textHolder += ("\n\n")
-        return _textHolder
+        _new_lines = []
+        _job_start_id = -1
+        for _line_idx, _line in enumerate(self._modified_text.splitlines()):
+            if (('/' in str(_line).strip()[0:2]) or ('@' in str(_line).strip()[0:2])) :
+                _job_start_id = _line_idx
+            _new_lines.append(f"{_line.strip()}")
+        for _new_line_idx, _line in enumerate(_new_lines):
+            if _new_line_idx > _job_start_id and (_line[0] != ' '):
+                _new_lines[_new_line_idx] = f" {_line}"
+        return '\n'.join(_new_lines)
 
     @ToolBox_Decorator
-    def add_job_by_text (self, definition_text:str, sourceFile:str=None, initial_data:dict[str,Any]=None) :
-        """adds a job to the end of the stream based off the given definition text."""
-        _new_jobObject = ToolBox_IWS_Job_Obj(
-            definition_text = definition_text,
-            sourceFile = sourceFile,
-            parent_path = self.full_path,
-            initial_data = initial_data
-        )
-        if all([_new_jobObject.full_path != _j.full_path for _j in self._job_collection]):
-            self._job_collection.append(_new_jobObject)
+    def reset_modfied_text (self):
+        if self._modified_text != self._source_text:
+            self._modified_text = self._source_text
         return self
     
     @ToolBox_Decorator
-    def get_Job_by_name (self, name:str):
-        """Returns the target Job by Name if found, returns None if none can be found."""
-        for _job in self._job_collection:
-            if (name.upper() in _job.full_path.upper()):
-                return _job
-        return None
-    
-    @ToolBox_Decorator
-    def search_replace_text (self, searchString:str, replaceString:str, updated_source:bool=False) :
+    def search_replace_text (self, searchString:str, replaceString:str, updated_source:bool=False, quite_logging:bool=False) :
         if (searchString in self._modified_text):
-            self.log.debug(f"Replaceing text in '{self.full_path}' from '{searchString}' to '{replaceString}'")
+            
             self._modified_text = re.sub(searchString, replaceString, self._modified_text, flags=re.IGNORECASE)
             if updated_source == True:
                 self._source_text = re.sub(searchString, replaceString, self._source_text, flags=re.IGNORECASE)
             self._reset_values_from_modified_text()
+            if (quite_logging != True): self.log.debug(f"Replaceing text in '{self._jobPath}' from '{searchString}' to '{replaceString}'")
         return self
-
+    
     @ToolBox_Decorator
     def get_resources (self) -> list[str]:
-        """Returns a list of Resource used by this Job Stream"""
+        """Returns a list of Resource used by this Job"""
         _results = []
         _pattern = re.compile(r"^(?=.{0,7}\bneeds\b).*?(\S+\s+){2}(\S+)", re.IGNORECASE | re.MULTILINE)
         for _match in _pattern.finditer(self._modified_text):
@@ -344,45 +357,18 @@ class ToolBox_IWS_Stream_Obj (UserDict):
         return _results
     
     @ToolBox_Decorator
-    def set_ON_REQUEST(self, value:bool):
-        """Adds or Removes the 'ON REQUEST' line from the stream definition."""
+    def set_NOP (self, value:bool=True):
+        """Adds or Removes the 'NOP' line from the Job definition."""
         _lines = self._modified_text.splitlines()
-        _DESCRIPTION_id = next((_idx for _idx, _line in enumerate(_lines) if 'DESCRIPTION' in _line[0:14]), -1)
-        _REQUEST_id = next((_idx for _idx, _line in enumerate(_lines) if 'ON REQUEST' in _line[0:16]), -1)
-        if (value == True) and (_REQUEST_id == -1):
-            self.log.debug (f"Adding 'ON REQUEST' to Stream : '{self.full_path}'.")
-            _lines.insert(_DESCRIPTION_id+1, 'ON REQUEST')
-        elif (value == True) and (_REQUEST_id != -1):
-            self.log.debug (f"Stream : '{self.full_path}' is already 'ON REQUEST'.")
-        if (value == False) and (_REQUEST_id != -1):
-            self.log.debug (f"Removing 'ON REQUEST' from Stream : '{self.full_path}'.")
-            _lines.pop(_REQUEST_id)
+        _RECOVERY_id = next((_idx for _idx, _line in enumerate(_lines) if 'RECOVERY' in _line[0:10]), -1)
+        _NOP_id = next((_idx for _idx, _line in enumerate(_lines) if 'NOP' in _line[0:6]), -1)
+        if (_NOP_id != -1) and (value == True):
+            self.log.debug (f"Job : '{self._jobPath}' is already set to NOP")
+        elif (_NOP_id != -1) and (value == False):
+            self.log.debug (f"Removing 'NOP' from Job : '{self._jobPath}'")
+            _lines.pop(_NOP_id)
+        elif (_NOP_id == -1) and (value == True):
+            self.log.debug (f"Adding 'NOP' to job : '{self._jobPath}'")
+            _lines.insert(_RECOVERY_id+1, 'ON REQUEST')
         self._modified_text = "\n".join(_lines)
-        return self
-    
-    @ToolBox_Decorator
-    def set_DRAFT (self, value:bool):
-        """Adds or Removes the 'DRAFT' line from the stream definition."""
-        _lines = self._modified_text.splitlines()
-        _DESCRIPTION_id = next((_idx for _idx, _line in enumerate(_lines) if 'DESCRIPTION' in _line[0:14]), -1)
-        _REQUEST_id = next((_idx for _idx, _line in enumerate(_lines) if 'ON REQUEST' in _line[0:16]), -1)
-        _DRAFT_id = next((_idx for _idx, _line in enumerate(_lines) if 'DRAFT' in _line), -1)
-        print (_DESCRIPTION_id, _REQUEST_id, _DRAFT_id)
-        if (_DRAFT_id != -1) and (value == True):
-            self.log.debug (f"Stream : '{self.full_path}' is already set to DRAFT.")
-        elif (_DRAFT_id != -1) and (value == False):
-            self.log.debug (f"Removing 'DRAFT' from Stream : '{self.full_path}'.")
-            _lines.pop(_DRAFT_id)
-        elif (_DRAFT_id == -1) and (value == True):
-            self.log.debug (f"Adding 'DRAFT' to Stream : '{self.full_path}'.")
-            _index = max([_DESCRIPTION_id, _REQUEST_id])
-            _lines.insert(_index+1, 'DRAFT')
-        self._modified_text = "\n".join(_lines)
-        return self
-    
-    @ToolBox_Decorator
-    def set_all_Jobs_NOP (self, value:bool):
-        """Sets the state of 'On Request' for all Job Streams in this file."""
-        for _job in self._job_collection:
-            _job.set_NOP(value)
         return self
