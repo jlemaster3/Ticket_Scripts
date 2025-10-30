@@ -7,10 +7,10 @@ from ToolBox_ECS_V1.Shared_Utils.ToolBox_Filters import (
 )
 
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import (
+    ToolBox_Amount_Options,
     ToolBox_Entity_Types,
     ToolBox_File_Types,
-    ToolBox_REGEX_Patterns,
-    ToolBox_Options
+    ToolBox_REGEX_Patterns    
 )
 
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Utils import (
@@ -24,4 +24,11 @@ from ToolBox_ECS_V1.Shared_Utils.ToolBox_Utils import (
     flatten_none,
     flatten_str,
     gen_uuid_key
+)
+
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Formatters import (
+    ToolBox_REGEX_identify_patterns,
+    ToolBox_string_find_REGEX_patterns,
+    ToolBox_list_of_dictionaries_to_string,
+    ToolBox_REGEX_text_score_evaluator,
 )

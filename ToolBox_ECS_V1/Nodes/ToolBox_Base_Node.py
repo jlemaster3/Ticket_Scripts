@@ -41,11 +41,11 @@ class ToolBox_ECS_Node (UserDict):
     
     #------- private properties -------#
     
-    _key:str = None
-    _name:str = None
-    _node_type:ToolBox_Entity_Types = None
-    _parent_entity:ToolBox_ECS_Node = None
-    _children_entities:list[ToolBox_ECS_Node] = None
+    _id_key:str
+    _name:str
+    _node_type:ToolBox_Entity_Types
+    _parent_entity:ToolBox_ECS_Node|None
+    _children_entities:list[ToolBox_ECS_Node]
 
     #------- Initialize class -------#
 
@@ -54,8 +54,8 @@ class ToolBox_ECS_Node (UserDict):
             name:str,
             node_type:ToolBox_Entity_Types,
             id_key:str|None=None,
-            parent_entitity:Optional[ToolBox_ECS_Node]=None, 
-            initial_data:dict[str,Any]=None
+            parent_entitity:ToolBox_ECS_Node|None=None, 
+            initial_data:dict[str,Any]|None=None
             
         ):
         """Required Attributes:
@@ -64,7 +64,7 @@ class ToolBox_ECS_Node (UserDict):
         """
         super().__init__(initial_data)
         self._name = name
-        self._key = id_key if id_key is not None else str(uuid.uuid5(uuid.NAMESPACE_DNS, str(random.randrange(1000000000))))
+        self._id_key = id_key if id_key is not None else str(uuid.uuid5(uuid.NAMESPACE_DNS, str(random.randrange(1000000000))))
         self._node_type = node_type or ToolBox_Entity_Types.NONE
         self._parent_entity = parent_entitity
         self._children_entities = []
@@ -91,7 +91,7 @@ class ToolBox_ECS_Node (UserDict):
     @property
     def id_key (self) -> str:
         """Returns this Nodes' ID / Key assignment."""
-        return self._key
+        return self._id_key
 
     @property
     def name (self) -> str:
@@ -118,10 +118,8 @@ class ToolBox_ECS_Node (UserDict):
         return [sib for sib in self._parent_entity.children if sib is not self]
     
     @property
-    def parent(self) -> list[ToolBox_ECS_Node]:
+    def parent(self) -> ToolBox_ECS_Node|None:
         """Return a list of sibling entities (excluding self)."""
-        if not self._parent_entity:
-            return None
         return self._parent_entity
     
     @parent.setter

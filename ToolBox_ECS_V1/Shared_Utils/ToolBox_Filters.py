@@ -10,8 +10,8 @@ from datetime import datetime
 
 def filter_directory_included(
         path:str, 
-        isolate_terms:list[str]=None, 
-        exclude_terms:list[str]=None, 
+        isolate_terms:list[str]|None=None, 
+        exclude_terms:list[str]|None=None, 
         isolate_any:bool=True, 
         exclude_any:bool=True
     ) -> bool:
@@ -31,8 +31,8 @@ def filter_directory_included(
 
 def filter_filename_included(
         path:str, 
-        isolate_terms:list[str]=None, 
-        exclude_terms:list[str]=None, 
+        isolate_terms:list[str]|None=None, 
+        exclude_terms:list[str]|None=None, 
         isolate_any:bool=True, 
         exclude_any:bool=True
     ) -> bool:
@@ -52,7 +52,7 @@ def filter_filename_included(
     return _status
 
 
-def filter_format_included(path:str, isolate_formats:list[str]=None) -> bool:
+def filter_format_included(path:str, isolate_formats:list[str]|None=None) -> bool:
     if os.path.isfile(path) == False:
         return False
     if isolate_formats:
@@ -61,7 +61,7 @@ def filter_format_included(path:str, isolate_formats:list[str]=None) -> bool:
     return True
 
 
-def filter_text_content_contains(path:str, containing_terms:list[str]=None,  isolate_any:bool=True,) -> bool:
+def filter_text_content_contains(path:str, containing_terms:list[str]|None=None,  isolate_any:bool=True,) -> bool:
     if os.path.isfile(path) == False:
         return False
     if not containing_terms:
@@ -77,7 +77,7 @@ def filter_text_content_contains(path:str, containing_terms:list[str]=None,  iso
         return False
 
 
-def filter_file_modified_after(path:str, last_modified: datetime = None) -> bool:
+def filter_file_modified_after(path:str, last_modified:datetime|None = None) -> bool:
     if not last_modified:
         return True
     _modified = datetime.fromtimestamp(os.path.getmtime(path))

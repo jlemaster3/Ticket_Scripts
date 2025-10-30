@@ -39,17 +39,17 @@ class ToolBox_CSV_File_Node (ToolBox_ECS_File_Node):
     
     #------- private properties -------#
     
-    _source_file_text:str = None
-    _modified_file_text:str = None
+    _source_file_text:str|None
+    _source_file_data:list[dict[str,dict[str,str|int|float|bool|None]]]|None
     
     #------- Initialize class -------#
 
     def __init__(
         self,
         source_file_path:str,
-        root_path:str = None,
-        parent_entitity:ToolBox_ECS_Node = None,
-        initial_data:dict[str,Any]=None
+        root_path:str|None = None,
+        parent_entitity:ToolBox_ECS_Node|None = None,
+        initial_data:dict[str,Any]|None=None
     ) :
         super().__init__(
             source_file_path = source_file_path,
@@ -57,7 +57,7 @@ class ToolBox_CSV_File_Node (ToolBox_ECS_File_Node):
             parent_entitity = parent_entitity,
             initial_data = initial_data
         )
-        self.node_type = ToolBox_Entity_Types.FILE_CSV,
+        self._node_type = ToolBox_Entity_Types.FILE_CSV
         self._source_file_text = None
         self._modified_file_text = None
 
@@ -65,19 +65,19 @@ class ToolBox_CSV_File_Node (ToolBox_ECS_File_Node):
     #-------public Getter & Setter methods -------#
     
     @property
-    def rows (self) -> list[dict[str,dict[str,str|int|float|bool|None]]]:
+    def rows (self) -> list[dict[str,dict[str,str|int|float|bool|None]]]|None:
         """Returns a list of rows as dict[column_name:value]."""
         return self._source_file_data
     
     @property
     def columns (self) -> list[str]:
         """Returns a list of columns"""
-        return list({key for d in self._source_file_data for key in d.keys()})
+        return list({key for d in self._source_file_data for key in d.keys()}) if self._source_file_data is not None else []
 
     #------- Public Methods -------#
 
     @ToolBox_Decorator
-    def open_file (self, quite_logging:bool=False):
+    def open_file (self, quite_logging:bool=False, enable_post_porcesses:bool=True):
         """Opens source Jil file and converts to IWS objects."""
         if self.is_Open != True:
             try:
@@ -98,7 +98,9 @@ class ToolBox_CSV_File_Node (ToolBox_ECS_File_Node):
                 self.log.warning (f"Unable to open file : '{self.relFilePath}'", data = errmsg)
             except FileNotFoundError as errmsg:
                 self.log.error (f"File not found : '{self.relFilePath}'")
-        return self
+        if (enable_post_porcesses == True) and (self._is_open == True):
+            # no post processes to run for CSV files.
+            pass
     
     @ToolBox_Decorator
     def close_file (self, quite_logging:bool=True):
@@ -107,4 +109,3 @@ class ToolBox_CSV_File_Node (ToolBox_ECS_File_Node):
             if (quite_logging != True): self.log.debug (f"Closing source file : '{self.relFilePath}'")
             self._isOpen = False
             self._source_file_text = None
-        return self

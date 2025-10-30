@@ -85,3 +85,5 @@ def gen_uuid_key (source:str|int|float|list|dict|datetime) -> str:
         raise TypeError(f"Source must be of type : [ string, int, float, list, dict, datetime ] , recieved : {type:(source)}")
     _tempString = flatten_any (source)
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, _tempString))
+
+

@@ -40,25 +40,27 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
     #------- private properties -------#
 
     _is_open:bool = False
-    _source_file_path:str = None
-    _source_root_path:str = None
-    _source_extension:str = None
-    _size_bytes:int = None
-    _last_modified:str = None
+    _source_file_path:str
+    _source_root_path:str|None
+    _source_extension:str
+    _source_file_text:str|None
+    _modified_file_text:str|None
+    _size_bytes:int
+    _last_modified:datetime
 
     #------- Initialize class -------#
 
     def __init__(
         self,
         source_file_path:str,
-        root_path:str = None,
-        parent_entitity:ToolBox_ECS_Node=None, 
-        initial_data:dict[str,Any]=None
+        root_path:str|None = None,
+        parent_entitity:ToolBox_ECS_Node|None=None, 
+        initial_data:dict[str,Any]|None=None
     ) :
         self._is_open = False
         _file_key = str(uuid.uuid5(uuid.NAMESPACE_DNS, source_file_path))
-        self._file_name = '.'.join(os.path.basename(source_file_path).split('.')[:-1])
-        self._source_extension = os.path.basename(source_file_path).split('.')[-1].lower()
+        self._file_name = os.path.basename(source_file_path).split('.')[0]
+        self._source_extension = os.path.basename(source_file_path).split('.')[-1]
         super().__init__(
             id_key = _file_key,
             name = self._file_name,
@@ -68,6 +70,8 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
         )
         self._source_file_path = source_file_path
         self._source_root_path = root_path
+        self._source_file_text = None
+        self._modified_file_text = None
         self._size_bytes = os.path.getsize(source_file_path)
         self._last_modified = datetime.fromtimestamp(os.path.getmtime(source_file_path))
     
@@ -87,7 +91,7 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
         return self._source_extension
     
     @property
-    def rootPath (self) -> str:
+    def rootPath (self) -> str|None:
         """Returns Root Path."""
         return self._source_root_path
     
@@ -104,11 +108,58 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
     @property
     def relPath (self) -> str:
         """Returns Relative Path without file name or file extention."""
-        return os.path.relpath(self._source_file_path,self._source_root_path)
+        return os.path.relpath(self.sourcePath,self._source_root_path)
     
     @property
     def relFilePath (self) -> str:
         """Returns Relative Path with file name and extention."""
-        return os.path.join(self.relPath, f"{self._name}{self._source_extension}")
+        return os.path.join(self.relPath, f"{self.name}.{self.foramt}")
 
     #------- Methods -------#
+
+    @ToolBox_Decorator
+    def open_file (self, quite_logging:bool=False, enable_post_porcesses:bool=True):
+        try:
+            with open(self._source_file_path, 'r', encoding='utf-8') as file:
+                content:str = file.read()
+                self._source_file_text = content
+                self._modified_file_text = content
+            self._is_open = True
+        except FileNotFoundError:
+            self.log.error(f"Error: The file '{self._source_file_path}' was not found.")
+            self._is_open = False
+        except IOError as e:
+            self.log.error(f"Error reading file '{self._source_file_path}': {e}")
+            self._is_open = False
+        if (enable_post_porcesses == True) and (self._is_open == True):
+            # no post processes to run for basic text files.
+            pass
+
+    @ToolBox_Decorator
+    def close_file (self):
+        """Closes current instance of the file, clearing all changes."""
+        self._source_file_text = None
+        self._modified_file_text = None
+        self._is_open = False
+    
+    @ToolBox_Decorator
+    def save_File (self, outputFolder:str, rename:str|None=None, useRelPath:bool=False):
+        """Saves teh current modifications of teh file to the target location."""
+        _outputPath = os.path.join(outputFolder,self.relPath) if useRelPath == True else outputFolder
+        os.makedirs(_outputPath, exist_ok=True)
+        _filename = rename if rename != None else self.name
+        _outputFilePath = os.path.join (_outputPath, f"{_filename}{self.foramt}")
+        if os.path.exists (_outputFilePath):
+            os.remove(_outputFilePath)
+        try:
+            _file_text = rf"""{self._modified_file_text}""" if self._modified_file_text is not None else None
+            if _file_text is not None:
+                with open(_outputFilePath, "w", encoding='utf-8') as output_file:
+                    output_file.write(_file_text)
+                self.log.info (f"Saved file : '{self.relFilePath}' as file : '{_outputFilePath}'")
+            else:
+                self.log.error (f"Unable to save file expecting'node._source_file_text' to be tpye of literal string, got : ", data=_file_text)
+        except SystemError as se :
+            self.log.error (f"Unable to save file : 'SystemError' : ", data = se)
+        except IOError as ioe:
+            self.log.error (f"Error saving file : 'IOError' :", data = ioe)
