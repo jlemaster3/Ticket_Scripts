@@ -333,7 +333,27 @@ class ToolBox_Data_Silo_Manager (UserDict):
         """Return the full DataFrame of entities and components."""
         _results = {}
         for _key, _row in self._dataframe.iterrows():
-            _row_dict = {_col:_val for _col, _val in _row.items() if pd.notna(_val)}
+            _row_dict: dict[str, Any] = {}
+            for _col, _val in _row.items():
+                # If value is an array-like or series, include only when it has length/size >= 1
+                if isinstance(_val, (np.ndarray, pd.Series)):
+                    try:
+                        # Prefer shape[0] for numpy/pandas, fallback to len()
+                        length = _val.shape[0] if hasattr(_val, "shape") else len(_val)
+                    except Exception:
+                        try:
+                            length = len(_val)
+                        except Exception:
+                            length = 0
+                    if length >= 1:
+                        _row_dict[str(_col)] = _val
+                elif isinstance(_val , (list, tuple, set)):
+                    if len(_val ) >= 1:
+                        _row_dict[str(_col)] = _val
+                else:
+                    # For scalars, use pd.isna to safely check for missing values
+                    if not pd.isna(_val):
+                        _row_dict[str(_col)] = _val
             _results[_key] = _row_dict
         return _results
     

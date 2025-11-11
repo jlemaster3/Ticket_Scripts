@@ -450,6 +450,8 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
             _curr_stream_data:dict[str,Any]|None = None
             _curr_job_data:dict[str,Any]|None = None
             _curr_stream_notes:list[str]|None = None
+            _curr_stream_idx:int = 0
+            _curr_job_idx:int = 0
             for _line_idx, _line_str in enumerate(self._modified_file_text.splitlines()):
                 _line_score = ToolBox_line_score_data(
                     source_index= _line_idx,
@@ -473,11 +475,15 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                         _curr_stream_data = None
                     if _curr_stream_data is None:
                         _curr_stream_data = {}
+                        _curr_stream_idx += 1
+                        _curr_job_idx = 0
                     for _result_list in _line_score.all_results.values():
                         for _score, _match in _result_list:
                             _found_results = _match.groupdict()
                             if all (_k in _found_results.keys() for _k in ['workstation', 'folder', 'stream']):
+                                
                                 _curr_stream_data['source_file'] = self.sourceFilePath
+                                _curr_stream_data['stream_index_in_file'] = _curr_stream_idx
                                 _curr_stream_data['obj_type'] = ToolBox_Entity_Types.IWS_JOB_STREAM
                                 _curr_stream_data['workstation'] = _found_results['workstation'] or None
                                 _curr_stream_data['folder'] = _found_results['folder'] or None
@@ -496,6 +502,7 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                         _curr_job_data = None
                     if _curr_job_data is None:
                         _curr_job_data = {}
+                        _curr_job_idx += 1
                     for _result_list in _line_score.all_results.values():
                         for _score, _match in _result_list:
                             _found_results = _match.groupdict()
@@ -512,29 +519,47 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                                     'name' in _curr_stream_data.keys()
                                     ):
                                     _uuid_string = f"{self.sourceFilePath}|{_curr_job_data['workstation']}{_curr_job_data['folder']}{_curr_stream_data['name']}."
-                                    _curr_job_data['parent_stream_key'] = _curr_stream_entity
-                                    if 'jobs' not in _curr_stream_data.keys():
+                                    _curr_job_data['parent_stream_key'] = _curr_stream_data['_hash']
+                                    _curr_job_data['job_index_in_stream'] = _curr_job_idx
+                                    if 'job_keys' not in _curr_stream_data.keys():
                                         _curr_stream_data['job_keys'] = []
-                                    _curr_stream_data['job_keys'].append(_curr_job_entity)
                                 else:
                                     _uuid_string = f"{self.sourceFilePath}|{_curr_job_data['workstation']}{_curr_job_data['folder']}"
                                 _uuid_string += f"{_curr_job_data['alias']}" if _curr_job_data['alias'] is not None else f"{_curr_job_data['name']}"
                                 
                                 _curr_job_data['_hash'] = gen_uuid_key(_uuid_string)
+                                if _curr_stream_data is not None and 'job_keys' in _curr_stream_data.keys():
+                                    _curr_stream_data['job_keys'].append(_curr_job_data['_hash'])
                                 if _curr_stream_notes is not None:
                                     _curr_job_data['pre_notes'] = '\n'.join(_curr_stream_notes)
                                     _curr_stream_notes = None
                 if (ToolBox_REGEX_Patterns.BLANK_LINE.name in _line_score.high_score_pattern_names):
                     if _curr_job_data is not None:
                         _last_job_entity = _curr_job_entity
+                        self.dataSilo.create_entity(
+                            key_id = _curr_job_data['_hash'] or None,
+                            components = _curr_job_data)
                         _curr_job_entity = None
                         _curr_job_data = None
+                        
 
                 if (ToolBox_REGEX_Patterns.IWS_STREAM_END_LINE.name in _line_score.high_score_pattern_names):
-                    if _curr_stream_entity is not None:
+                    if _curr_stream_data is not None:
                         _last_stream_entity = _curr_stream_entity
+                        self.dataSilo.create_entity(
+                            key_id = _curr_stream_data['_hash'] or None,
+                            components = _curr_stream_data
+                        )
                         _curr_stream_entity = None
                         _curr_stream_data = None
+                    if _curr_job_data is not None:
+                        _last_job_entity = _curr_job_entity
+                        self.dataSilo.create_entity(
+                            key_id = _curr_job_data['_hash'] or None,
+                            components = _curr_job_data)
+                        _curr_job_entity = None
+                        _curr_job_data = None
+                        _curr_job_idx = 0
                 
                         
     

@@ -71,9 +71,10 @@ if __name__ == "__main__":
     
     for _idx, (_key, _components) in enumerate(ToolBox.dataSilo.all_entities().items()):
         log.blank('-'*100)
+        log.debug (f"[{_idx}] '{_key}' | Component list : [{len(_components.keys())}]")
         for _k, _v in _components.items():
             
-            log.blank(f"[{_idx}] '{_key}' | '{_k}' : {_v}")
+            log.blank(f"'{_k}' : {_v}")
 
 
     log.critical(f"End of log for ticket : {ticketNumber} under contract : {contract}")

@@ -151,7 +151,7 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
             pass
 
     @ToolBox_Decorator
-    def close_file (self):
+    def close_file (self, quite_logging:bool=False):
         """Closes current instance of the file, clearing all changes."""
         self._source_file_text = None
         self._modified_file_text = None
@@ -159,7 +159,7 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
         self._has_changed = False
     
     @ToolBox_Decorator
-    def save_File (self, outputFolder:str, rename:str|None=None, useRelPath:bool=False):
+    def save_File (self, outputFolder:str, rename:str|None=None, useRelPath:bool=False, quite_logging:bool=False):
         """Saves teh current modifications of teh file to the target location."""
         _outputPath = os.path.join(outputFolder,self.relPath) if useRelPath == True else outputFolder
         os.makedirs(_outputPath, exist_ok=True)
