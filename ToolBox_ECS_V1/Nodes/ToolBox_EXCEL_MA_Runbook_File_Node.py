@@ -10,12 +10,12 @@ from ToolBox_ECS_V1.ToolBox_Logger import OutputLogger
 from ToolBox_ECS_V1.Nodes.ToolBox_EXCEL_File_Node import ToolBox_XLSX_File_Node
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import ToolBox_Entity_Types
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Formatters import (
-    ToolBox_list_of_dictionaries_to_string
+    ToolBox_list_of_dictionaries_to_table
 )
 
 if TYPE_CHECKING:
     from ToolBox_ECS_V1.Nodes.ToolBox_Base_Node import ToolBox_ECS_Node
-    from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_IWS_Obj_Node
+    from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_Obj_Node
 #from ToolBox_ECS_V1.ToolBox_Manager import ToolBox_Manager
 
 #-------------------------------------------------
@@ -127,7 +127,6 @@ class ToolBox_IWS_XLSX_Runbook_File_Node (ToolBox_XLSX_File_Node):
             self._runbook_info_table_obj = self.sheet_to_table_obj(self._runbook_info_tab_name, header_row_index=12)
             self._runbook_data_table_obj = self.sheet_to_table_obj(self._runbook_data_table_tab_name, header_row_index=2)
             self._runbook_hidden_data_table_obj = self.sheet_to_table_obj(self._runbook_hidden_data_table_tab_name, header_row_index=2)
-
-            #self.log.blank (ToolBox_list_of_dictionaries_to_string(self._runbook_info_table_obj))
-            #self.log.blank (ToolBox_list_of_dictionaries_to_string(self._runbook_data_table_obj))
+            #self.log.blank (ToolBox_list_of_dictionaries_to_table(self._runbook_info_table_obj))
+            #self.log.blank (ToolBox_list_of_dictionaries_to_table(self._runbook_data_table_obj))
     

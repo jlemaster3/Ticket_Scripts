@@ -3,6 +3,7 @@
 #-------------------------------------------------
 import os, sys, copy, re
 from datetime import datetime as dt
+from typing import Any
 
 ## Imports ToolBox, and log
 _curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,29 +16,6 @@ from ToolBox_ECS_V1 import *
 #   Steps
 #-------------------------------------------------
 
-#def list_of_named_rows_to_string (source_row_list:list[dict[str,str|int|float|bool|None]]) -> str:
-#    _headers = list(source_row_list[0].keys())
-#    _headers.insert(0,'Row Index')
-#    _col_width:dict[str,int] = {_h: len(_h) for _h in _headers}
-#    for _indx, _row in enumerate(source_row_list):
-#        _row['Row Index'] = _indx + 1
-#        for _header, _value in _row.items():
-#            _col_width[_header] = max(_col_width[_header], len(str(_value)))
-#    _header_row = " | ".join(f"{_h:^{_col_width[_h]}}" for _h in _headers)
-#    _separator = '-+-'.join("-" * _w for _w in _col_width.values())
-#    _data_rows = []
-#    for _row in source_row_list:
-#        _parts = []
-#        for _h in _headers:
-#            _target_val = _row.get(_h, None)
-#            if isinstance(_target_val,str):
-#                _parts.append(f"{str(_target_val):<{_col_width[_h]}}")
-#            else:
-#                _parts.append(f"{str(_target_val):^{_col_width[_h]}}")
-#        _row_str = " | ".join(_parts)
-#        _data_rows.append(_row_str)
-#    _table_parts = [_header_row, _separator]+_data_rows
-#    return '\n'.join(_table_parts)
 
 def Action_Add_DEADLINE_to_streams (
     Output_Folder_path:str ,
@@ -45,6 +23,8 @@ def Action_Add_DEADLINE_to_streams (
 ):
     """For each file in source path, find all IWS assets, and duplicate them, then preform a search and replace on teh duplicated assest's text.
     Append the duplcated and udpated text to the current file, and save a copy of the file to a new location for review."""
+    
+    _target_name_to_deadline:dict[str,str] = {}
     _target_deadline_objects:dict[str, str] = {}
     _target_deadline_with_notes:dict[str, str] = {}
     for _file_node in ToolBox.XLSX_file_nodes:
@@ -53,48 +33,74 @@ def Action_Add_DEADLINE_to_streams (
             _job_name = _row['IWS - Prod Job Name']
             _add_deadLine = True if any([str(_row['DEADLINE 0400 WARN? (Y/N)']).lower() == _v.lower() for _v in ['Y','y','1','true']]) else False
             _has_notes = False if (_row['Notes'] is None) or (str(_row['Notes']).strip() == '') else True
-            _target_name = f"@.{_job_name}"
+            _target_name = f"{_job_name}"
             if _add_deadLine == True and _has_notes == False:
                 if _target_name not in _target_deadline_objects.keys():
-                    _target_deadline_objects[_target_name] = 'DEADLINE 0400 WARN' 
+                    _target_deadline_objects[_target_name] = 'DEADLINE 0400 WARN'
+                    _target_name_to_deadline[_target_name] = 'DEADLINE 0400 WARN'
             elif _add_deadLine == True and _has_notes == True:
                 if _target_name not in _target_deadline_with_notes.keys():
                     _target_deadline_with_notes[_target_name] = _row['Notes']
         if (quite_logging != True): log.blank(ToolBox.Foramt_list_of_dictionaries_to_multiline_str(_file_node._sheets_as_tables['Job List']))
         log.info (f"numebr of items to set DEDALINE at 0400 without special notes : [{len(_target_deadline_objects)}]")
-        log.info (f"numebr of items to set DEADLINE 0400 and WARN with special notes : [{len(_target_deadline_with_notes)}]")
-        _found_table_list:list[dict[str, str]] = [{"Job Name": str(_k), "DEADLINE 0400 WARN? (Y/N)":"Y", "Note":_v} for _k,_v in _target_deadline_with_notes.items()]
-        log.info (f"Item do not match criteria and are being exlcuded from list : ")
+        _found_table_list:list[dict[str, str]] = [{"Job Name": str(_k), "DEADLINE 0400 WARN? (Y/N)":"Y", "Note":_v} for _k,_v in _target_deadline_objects.items()]
         log.blank(ToolBox.Foramt_list_of_dictionaries_to_multiline_str(_found_table_list))
-    _deadline_rows:dict[str,dict[str,str]] = {}
-    _missing_deadline_rows:list[str] = []
-    for _runbk in ToolBox.IWS_Runbook_file_nodes:
-        log.info(f"runbook : '{_runbk.relFilePath}' contains [{len(_runbk.job_stream_full_paths)}] Job Stream and [{len(_runbk.job_full_paths)}] Job Definitions")
-        if _runbk.relFilePath not in _deadline_rows.keys():
-            _deadline_rows[_runbk.relFilePath] = {}
-        for _row in _runbk._runbook_data_table_obj:
-            _sub_data_row = {}
-            if (('Full Path') in _row.keys() and 
-                _row['Full Path'] is not None and 
-                'Deadline' in _row.keys() and
-                _row['Deadline'] is not None
-            ):
-                if 'Full Path' not in _sub_data_row.keys():
-                    _sub_data_row['Full Path'] = _row['Full Path']
-                if 'Deadline' not in _sub_data_row.keys():
-                    _sub_data_row['Deadline'] = _row['Deadline']
-            if len(_sub_data_row) >= 1:
-                _deadline_rows[_runbk.relFilePath] = _sub_data_row
-        if len(_deadline_rows[_runbk.relFilePath].keys()) == 0:
+        log.blank('-'*100)
+        log.info (f"numebr of items to set DEADLINE 0400 and WARN with special notes : [{len(_target_deadline_with_notes)}]")
+        _found_table_list_with_notes:list[dict[str, str]] = [{"Job Name": str(_k), "DEADLINE 0400 WARN? (Y/N)":"Y", "Note":_v} for _k,_v in _target_deadline_with_notes.items()]
+        if len(_found_table_list_with_notes) >= 1:
+            log.info (f"Item do not match criteria and are being exlcuded from list : ")
+            log.blank(ToolBox.Foramt_list_of_dictionaries_to_multiline_str(_found_table_list_with_notes))
+            log.blank('-'*100)
+    #_deadline_rows:list[dict[str,str]] = []
+    #for _runbk in ToolBox.IWS_Runbook_file_nodes:
+    #    log.info(f"runbook : '{_runbk.relFilePath}' contains [{len(_runbk.job_stream_full_paths)}] Job Stream and [{len(_runbk.job_full_paths)}] Job Definitions")
+    #    for _row in _runbk._runbook_data_table_obj:
+    #        if (_row['Deadline'] is not None and 
+    #            _row['Full Path'] is not None and
+    #            _row['Object Type'] is not None
+    #        ):
+    #            _target_name = _row['Full Path'].split('/')[-1]
+    #            if _row['Object Type'] == 'Job Stream':
+    #                _target_name = _target_name.split('.')[0]
+    #            elif _row['Object Type'] == 'Job':
+    #                _target_name = _target_name.split('.')[-1]
+    #            _target_name_to_deadline[_target_name] = _row['Deadline']
+    #            _deadline_rows.append({
+    #                'Full Path':_row['Full Path'],
+    #                'Object Type':_row['Object Type'],
+    #                'Deadline':_row['Deadline'],
+    #            })
+    #log.blank(ToolBox.Foramt_list_of_dictionaries_to_multiline_str([_r for _r in _deadline_rows]))
+    #log.blank('-'*100)
+
+    _files_to_edit:dict[str,list[str]] = {}
+    _found:list[str] = []
+    for _node in ToolBox.IWS_object_nodes:
+        _node_name = _node.name.replace('{E}', 'P').replace('{ENV}','PROD')
+        if _node_name in _target_name_to_deadline.keys():
+            _found.append(_node_name)
+            if _node.sourceFile_Path not in _files_to_edit:
+                _files_to_edit[_node.sourceFile_Path] =[]
+            _files_to_edit[_node.sourceFile_Path].append(_node_name)
+            deadline_settings = _target_name_to_deadline[_node_name]
             
-            del _deadline_rows[_runbk.relFilePath]
-            _missing_deadline_rows.append(_runbk.relFilePath)
-    log.debug(f"Found a total of [{len(_deadline_rows)}] items marrked for Deadline updates in runbooks")
-    log.blank(ToolBox.Foramt_list_of_dictionaries_to_multiline_str(list(_deadline_rows.values())))
-
-
-    log.debug(f"Found a total of [{len(_missing_deadline_rows)}] provided but does not contain any values the  'Deadline' column")
-    log.blank(data=_missing_deadline_rows, list_data_as_table=True, column_count=1)
+            _dl_time = re.search(r'(\d{4})',deadline_settings, re.IGNORECASE)
+            _dl_time = _dl_time.group(1) if _dl_time is not None else "0400"
+            _dl_plus_minus_day = re.search(r'([+-] ?\d*)\s*[Dd][Aa][Yy]',deadline_settings, re.IGNORECASE)
+            _dl_plus_minus_day = _dl_plus_minus_day.group(1) if _dl_plus_minus_day is not None else None
+            
+            log.info(f"Setting '{_node.full_path}' Deadline to : '{deadline_settings}'", data=[('time',_dl_time),('day_offset',_dl_plus_minus_day)])
+            _node.set_DEADLINE(time_hhmm=_dl_time,day_offset=_dl_plus_minus_day)
+            log.blank('-'*100)
+    _total = sum([len(_v) for _v in _files_to_edit.values()])
+    
+    print (f'total found {_total} in {len(_files_to_edit.keys())}')
+    
+    for _jil_file in ToolBox.JIL_file_nodes:
+        #log.blank(_jil_file.node_stricture_to_string())
+        _jil_file.save_File(Output_Folder_path, useRelPath=True, quite_logging= False, skip_unchanged=True)
+    
 
 #-------------------------------------------------
 #   Initialize Script
@@ -118,26 +124,99 @@ if __name__ == "__main__":
         source_dir = Source_Path,
         isolate_directory_names=['PROD'],
         isolate_formats=['jil', 'job'],
+#        isolate_fileName_names= [
+#            "PAELG_REPORTS",
+#            "PBBUY_COBA_RECV",
+#            "PBBUY_COBA_SEND",
+#            "PD5BUY_DREPORTS",
+#            "PD5BUY_DSTATE",
+#            "PD5ELG_ID_CARD",
+#            "PD5ELG_INT_RPTS",
+#            "PD5ELG_LU_RPTS",
+#            "PD5MGD_ENROLL",
+#            "PD5MGD_INIT",
+#            "PD5MGD_ROSTER",
+#            "PD5MGD_UPD_MAIL",
+#            "PD5PRV",
+#            "PD5RBT_JOBS",
+#            "PD7EDI_RPTS",
+#            "PD7PAU",
+#            "PD7PRV_7",
+#            "PMBUY_EOM_RPTS",
+#            "PMBUY_MBILL_RPTS",
+#            "PMCTM",
+#            "PMEDI_RPTS",
+#            "PMELG_REPORTS",
+#            "PMMGD",
+#            "PMMGD_1ST_MONTH",
+#            "PMMGD_2WK_BF_RST",
+#            "PMMGD_3RD_WED",
+#            "PMMGD_CAP_AFT_FN",
+#            "PMMGD_CAP_SUM",
+#            "PMMGD_LASTCALDAY",
+#            "PMMGD_ROSTER",
+#            "PMPAU_REPORTS",
+#            "PMPRV",
+#            "PMRBT_JOBS",
+#            "PQELG_REPORTS",
+#            "PQPRV",
+#            "PRPRV_ANNUAL",
+#            "PRRBT_ORQST",
+#            "PWBUY_WREPORTS",
+#            "PWEDI_RPTS",
+#            "PWELG_DUP_RPT",
+#            "PWELG_REPORTS",
+#            "PWPAU",
+#            "PWPRV",
+#            "PWRBT_JOBS",
+#            "PADUR_PD10",
+#            "PD5CLM_PBA_EXTR",
+#            "PD6CLM_205",
+#            "PD7CLM_DBRD_STAT",
+#            "PD7CLM_RPT_LATE",
+#            "PD7CLM_VERINT",
+#            "PD7FIN_RPT_MOVE",
+#            "PD7REF_DRUG_INFO",
+#            "PD7REF_PROC_INFO",
+#            "PM1SATCLM_EOM",
+#            "PMDUR_FDB_LOAD",
+#            "PMDUR_PD10",
+#            "PQCLM",
+#            "PQFIN_FP",
+#            "PWCLM_RATEADJ",
+#            "PWFRICLM_205",
+#            "PWFRICLM_EOW",
+#            "PWFRICLM_EXW",
+#            "PWREF061",
+#            "PWREF062",
+#            "PWREF063",
+#            "PWREF_FDB_UPD",
+#            "PWREF_WW00",
+#            "PWSUNENC_RESP"
+#        ],
         quite_logging=True
     )
-    #
-    #ToolBox.load_file_nodes(
-    #    skip_duplicates=False, 
-    #    quite_logging=True
-    #    )
-    #log.info (f"Total Nodes being Tracked :[{len(ToolBox)}]")
-    #log.blank('-'*100)
+    
+    ToolBox.load_file_nodes(
+        skip_duplicates=False,
+        quite_logging=True,
+        enable_post_porcesses = True
+        )
     
     ToolBox.collect_files_as_nodes(
         source_dir = _working_path,
         isolate_formats=['xlsx'],
         quite_logging=True
     )
-
+    
     Action_Add_DEADLINE_to_streams(
         Output_Folder_path=_output_path
     )
     
+    log.blank('-'*100)
+    log.blank(ToolBox.node_stats)
+    log.blank('-'*100)
+
     log.critical(f"End of log for ticket : {Ticket_Number} under contract : {Contract_Name}")
     log .info (f"Script processing time : {dt.now() - _start_time}")
 

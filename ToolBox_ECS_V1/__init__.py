@@ -1,5 +1,5 @@
 from ToolBox_ECS_V1.ToolBox_Logger import OutputLogger
-from ToolBox_ECS_V1.ToolBox_Manager import ToolBox
+from ToolBox_ECS_V1.ToolBox_Main import ToolBox
 from ToolBox_ECS_V1.Nodes import (
     ToolBox_ECS_Node,
     ToolBox_Base_File_Node,

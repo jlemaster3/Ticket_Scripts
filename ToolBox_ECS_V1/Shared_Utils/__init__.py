@@ -1,3 +1,4 @@
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Timezones import ToolBox_Timezone_Patterns
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Filters import (
     filter_text_content_contains,
     filter_directory_included,
@@ -10,7 +11,10 @@ from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import (
     ToolBox_Amount_Options,
     ToolBox_Entity_Types,
     ToolBox_File_Types,
-    ToolBox_REGEX_Patterns    
+    ToolBox_REGEX_Patterns,
+    ToolBox_Struct_Entity_Relationships,
+    ToolBox_Struct_IWS_Stream,
+    ToolBox_Struct_IWS_Job    
 )
 
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Utils import (
@@ -28,7 +32,8 @@ from ToolBox_ECS_V1.Shared_Utils.ToolBox_Utils import (
 
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Formatters import (
     ToolBox_REGEX_identify_patterns,
-    ToolBox_string_find_REGEX_patterns,
-    ToolBox_list_of_dictionaries_to_string,
+    ToolBox_list_of_dictionaries_to_table,
     ToolBox_REGEX_text_score_evaluator,
+    ToolBox_line_score_data
 )
+

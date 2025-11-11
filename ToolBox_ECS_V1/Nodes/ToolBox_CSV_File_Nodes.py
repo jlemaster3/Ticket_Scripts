@@ -11,7 +11,7 @@ from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import ToolBox_Entity_Types
 
 if TYPE_CHECKING:
     from ToolBox_ECS_V1.Nodes.ToolBox_Base_Node import ToolBox_ECS_Node
-    from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_IWS_Obj_Node
+    from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_Obj_Node
 #from ToolBox_ECS_V1.ToolBox_Manager import ToolBox_Manager
 
 #-------------------------------------------------

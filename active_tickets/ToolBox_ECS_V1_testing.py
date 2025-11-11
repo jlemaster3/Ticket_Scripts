@@ -41,25 +41,41 @@ if __name__ == "__main__":
 
     _file_list = ToolBox.collect_files_as_nodes(
         source_dir = source_path,
-        isolate_directory_names= ['prod'],
+        #isolate_directory_names= ['prod'],
         isolate_fileName_names = ["Temp_test"],
-        isolate_formats=['jil','job']
+        isolate_formats=['jil','job'],
+        quite_logging=False
     )
-    ToolBox.load_file_nodes(skip_duplicates=False)
-    log.info (f"Total Nodes being Tracked :[{len(ToolBox)}]")
-    log.blank('-'*100)
-
-    for _js_cntr, _stream in enumerate(ToolBox.IWS_Job_Stream_nodes):
-        log.debug (f"[{_js_cntr}] - {_stream.full_path}")
-        _stream_text = _stream.format_as_Job_Stream(
-            indent=0,
-            include_notes=True,
-            include_jobs=True,
-            include_end=True
+    ToolBox.load_file_nodes(
+        skip_duplicates=False, 
+        quite_logging=False,
+        contents_as_entities=True
         )
-        log.blank(_stream_text)
+    
+    log.blank('-'*100)
+    log.info (f"Total Nodes being Tracked :[{len(ToolBox)}]")
+    
+
+    log.blank(ToolBox.node_stats)
+    for _jil_file in ToolBox.JIL_file_nodes:
+        log.debug(f"{_jil_file.relFilePath} | Children [{len(_jil_file.children)}]", data = _jil_file.children)
+        for _child in _jil_file.children:
+            log.debug(f"{type(_child)}",data=_child)
 
     log.blank('-'*100)
+
+    for _col_idx, _col_name in enumerate(ToolBox.dataSilo.get_column_names):
+        _entities_with_col = ToolBox.dataSilo.get_entities_with(_col_name)
+        log.blank(f"[{_col_idx}] '{_col_name}' [{len(_entities_with_col)}]")
+
+    
+    for _idx, (_key, _components) in enumerate(ToolBox.dataSilo.all_entities().items()):
+        log.blank('-'*100)
+        for _k, _v in _components.items():
+            
+            log.blank(f"[{_idx}] '{_key}' | '{_k}' : {_v}")
+
+
     log.critical(f"End of log for ticket : {ticketNumber} under contract : {contract}")
     log .info (f"Script processing time : {dt.now() - _start_time}")
     print ("Complete.")

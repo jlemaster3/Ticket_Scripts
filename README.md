@@ -6,4 +6,6 @@ The ‘/ToolBox_ECS_V1/’ directory is for a work in progress single import for
 
 
 Requirments:
+    Pandas    
+    Numpy
     Openpyxl

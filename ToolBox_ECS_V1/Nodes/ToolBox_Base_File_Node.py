@@ -45,6 +45,7 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
     _source_extension:str
     _source_file_text:str|None
     _modified_file_text:str|None
+    _has_changed:bool
     _size_bytes:int
     _last_modified:datetime
 
@@ -72,8 +73,15 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
         self._source_root_path = root_path
         self._source_file_text = None
         self._modified_file_text = None
+        self._has_changed = False
         self._size_bytes = os.path.getsize(source_file_path)
         self._last_modified = datetime.fromtimestamp(os.path.getmtime(source_file_path))
+    
+    def __contains__(self, item):
+        """
+        Defines how membership is checked for MyContainer instances.
+        """
+        return item in self._modified_file_text
     
     def __repr__(self):
         return f"{type(self)} (source_file_path:str = {self.sourceFilePath})"
@@ -114,6 +122,10 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
     def relFilePath (self) -> str:
         """Returns Relative Path with file name and extention."""
         return os.path.join(self.relPath, f"{self.name}.{self.foramt}")
+    
+    @property
+    def has_changed (self) ->bool:
+        return self._modified_file_text == self._source_file_text
 
     #------- Methods -------#
 
@@ -125,12 +137,15 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
                 self._source_file_text = content
                 self._modified_file_text = content
             self._is_open = True
+            self._has_changed = False
         except FileNotFoundError:
             self.log.error(f"Error: The file '{self._source_file_path}' was not found.")
             self._is_open = False
+            self._has_changed = False
         except IOError as e:
             self.log.error(f"Error reading file '{self._source_file_path}': {e}")
             self._is_open = False
+            self._has_changed = False
         if (enable_post_porcesses == True) and (self._is_open == True):
             # no post processes to run for basic text files.
             pass
@@ -141,6 +156,7 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
         self._source_file_text = None
         self._modified_file_text = None
         self._is_open = False
+        self._has_changed = False
     
     @ToolBox_Decorator
     def save_File (self, outputFolder:str, rename:str|None=None, useRelPath:bool=False):
@@ -163,3 +179,32 @@ class ToolBox_ECS_File_Node (ToolBox_ECS_Node):
             self.log.error (f"Unable to save file : 'SystemError' : ", data = se)
         except IOError as ioe:
             self.log.error (f"Error saving file : 'IOError' :", data = ioe)
+
+    @ToolBox_Decorator
+    def reset_modified_text (self):
+        """Resets the current state of teh modified text to the stored state of the text when the file was last opened."""
+        if self._is_open != True:
+            self.open_file(quite_logging=True, enable_post_porcesses=False)
+        if self._is_open == True and self._modified_file_text is not None and self._source_file_text is not None:
+            self._modified_file_text = self._source_file_text
+
+    @ToolBox_Decorator
+    def search_for_terms (self, search_terms:list[str]) -> dict[str,bool]:
+        """Returns a collection of terms and boolean values if found in text."""
+        if self._is_open != True:
+            self.open_file(quite_logging=True, enable_post_porcesses=False)
+        _terms:dict[str,bool] = {}
+        for _term in search_terms:
+            if self._modified_file_text is not None:
+                _terms[_term] = _term in self._modified_file_text
+        return _terms
+    
+    @ToolBox_Decorator
+    def search_replace_terms (self, search_repalce_strings:dict[str,str]):
+        if self._is_open != True:
+            self.open_file(quite_logging=True, enable_post_porcesses=False)
+        """Preforms a basic search and replace string operation on the current state of the file text."""
+        for _search, _replace in search_repalce_strings.items():
+            if self._modified_file_text is not None:
+                self._modified_file_text = self._modified_file_text.replace(_search, _replace)
+

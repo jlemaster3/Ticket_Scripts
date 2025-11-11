@@ -3,7 +3,7 @@
 #-------------------------------------------------
 import re, uuid
 from enum import StrEnum
-from typing import Literal, Any
+from typing import Literal, Any, TypedDict, NotRequired, Required, Dict, Type
 from collections import UserDict
 from ToolBox_ECS_V1.ToolBox_Logger import OutputLogger
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import (
@@ -38,83 +38,7 @@ def ToolBox_REGEX_identify_patterns (source_text:str) -> list[list[ToolBox_REGEX
     return _container
 
 
-def ToolBox_string_find_REGEX_patterns (
-        source_text:str, 
-        filter_patterns:list[str]|None=None, 
-        filter_AnyOrAll:Literal[ToolBox_Amount_Options.ANY, ToolBox_Amount_Options.ALL] = ToolBox_Amount_Options.ANY,
-        flags_list:list[re.RegexFlag] = [re.IGNORECASE|re.MULTILINE],
-        quite_logging:bool = False,
-    ) -> dict[str,list[dict[str,Any]]]:
-    """tries to format the privided text based off the IWS REGEX patterns"""
-    _line_pattern_list:list[list[ToolBox_REGEX_Patterns]] = ToolBox_REGEX_identify_patterns(source_text)
-    # No patterns matched source string, return empty list.
-    if (_line_pattern_list is None) and (len(_line_pattern_list) == 0): 
-        return []
-    # Mulitple patterns were found, find score value os patterns
-    _source_lines = source_text.splitlines()
-    _score_holder:dict[str,list[dict[str,Any]]] = {}
-    _score_data = {
-        'line_index' : -1,
-        'patern_index' : 0,
-        'pattern' : ToolBox_REGEX_Patterns.BLANK_LINE,
-        'groups' : None,
-        'score' : 0,
-    }
-    for _line_idx in range(len(_line_pattern_list)):
-        if ((filter_patterns is not None) and (len(filter_patterns) >= 1)) and (filter_AnyOrAll == ToolBox_Amount_Options.ALL):
-            _patternList = [_p for _p in _line_pattern_list[_line_idx] if all([_f.upper() in _p.upper() for _f in filter_patterns])]
-        elif ((filter_patterns is not None) and (len(filter_patterns) >= 1)) and (filter_AnyOrAll == ToolBox_Amount_Options.ANY):
-            _patternList = [_p for _p in _line_pattern_list[_line_idx] if any([_f.upper() in _p.upper() for _f in filter_patterns])]
-        else:
-            _patternList = _line_pattern_list[_line_idx]
-        _source_line:str = _source_lines[_line_idx]
-        if _source_line not in _score_holder.keys():
-                _score_holder[_source_line] = []
-        if _source_line is None or _source_line.strip() == '':
-            _score_data = {
-                'line_index' : _line_idx,
-                'patern_index' : 0,
-                'pattern' : ToolBox_REGEX_Patterns.BLANK_LINE,
-                'groups' : None,
-                'score' : 0,
-            }
-            log.debug (f"line : '{_source_line}' - High Score: [0] - Pattern(s) : ", data=[ToolBox_REGEX_Patterns.BLANK_LINE])    
-            
-            continue
-        _flag_val:int = sum(flags_list)
-        _high_score_val = None
-        _high_score_pattern_list = []
-        for _pattern_idx, _pattern in enumerate(_patternList):
-            _score_val:int = 0
-            _results = re.search(ToolBox_REGEX_Patterns[_pattern], _source_line, _flag_val)
-            if _results:
-                if (filter_patterns is not None):
-                    _score_val += 10 * len([_s for _s in filter_patterns if _s.upper() in _pattern.upper()])
-                _nonNone_group_ids = [_id for _id, _grp in enumerate(_results.groups()) if _grp is not None and _grp.strip() != '']
-                _score_val -= 5 * abs(len(_results.groups())-len(_nonNone_group_ids))
-                _score_val += 5 * len(_results.groups())
-                _score_data = {
-                    'line_index' : _line_idx,
-                    'patern_index' : _pattern_idx,
-                    'pattern' : _pattern,
-                    'groups' : _results.groups(),
-                    'score' : _score_val,
-                }                    
-                if (_high_score_val is None) or (_score_val > _high_score_val):
-                    _high_score_val = _score_val
-                    _high_score_pattern_list = [_pattern]
-                elif (_score_val == _high_score_val):
-                    _high_score_pattern_list.append(_pattern)
-            _score_holder[_source_line].append(_score_data)        
-        if (quite_logging != True) :
-            log.debug (f"High Score: [{_high_score_val}] - line : '{_source_line}' - Pattern(s) [{len(_high_score_pattern_list)}]: {_high_score_pattern_list}")
-            for _sd_idx, _s_data in enumerate(_score_holder[_source_line]):
-                _score_groups = ', '.join([_p for _p in _s_data['groups'] if _p is not None]) if _s_data['groups'] is not None else 'None'
-                log.blank(f"[{_sd_idx}] - Score : [{_s_data['score']}] - pattern : '{_s_data['pattern']} - found : [{_score_groups}]'")
-    return _score_holder
-
-
-def ToolBox_list_of_dictionaries_to_string (source_row_list:list[dict[str,Any]], include_row_idx:bool=True) -> str:
+def ToolBox_list_of_dictionaries_to_table (source_row_list:list[dict[str,Any]], include_row_idx:bool=True) -> str:
     """Takes a list of rows represented by a dictionary of key : value pairs that are the column name and value for that row."""
     _headers = list(source_row_list[0].keys())
     if include_row_idx == True:
@@ -154,6 +78,164 @@ def ToolBox_Decorator(func):
 #   Classes
 #-------------------------------------------------
 
+class ToolBox_line_score_data (UserDict):
+    
+    _source_index:int
+    _source_text:str
+    
+    _flag_list:list[re.RegexFlag]
+    _flag_val:int
+    _filter_AnyOrAll:ToolBox_Amount_Options|str|None
+    _filter_patterns:list[str]|None
+    _results: dict[str,list[tuple[int,re.Match]]]|None
+    _bonus_score:int|None
+    _score: int|None
+
+    #------- Initialize class -------#
+    
+    def __init__ (self,
+            source_index:int,
+            source_text:str,
+            filter_patterns:list[str]|None = None,
+            filter_AnyOrAll:ToolBox_Amount_Options|str|None = None,
+            flags:list[re.RegexFlag]|None = None,
+            bonus_score:int|None = None,
+            initial_data: Dict[str, Any] | None = None, 
+            **kwargs: Any | None
+        ):
+        super().__init__(initial_data, kwargs = kwargs)
+        self._source_index = source_index
+        self._source_text = source_text
+        self._flag_list = flags or [re.IGNORECASE]
+        if any(_p in source_text for _p in ['\n', '\r']) and re.MULTILINE not in self._flag_list:
+            self._flag_list.append(re.MULTILINE)
+        self._filter_patterns = filter_patterns
+        try:
+            self._filter_AnyOrAll = filter_AnyOrAll if (
+                (filter_AnyOrAll is not None) and 
+                    (isinstance(filter_AnyOrAll, ToolBox_Amount_Options) or 
+                        (isinstance(filter_AnyOrAll,str) and 
+                            filter_AnyOrAll in ToolBox_Amount_Options
+                        )
+                    )
+                ) else ToolBox_Amount_Options.ANY
+        except:
+            self._filter_AnyOrAll = ToolBox_Amount_Options.ANY
+        self._flag_val:int = sum(self._flag_list)
+        self._bonus_score = bonus_score
+        self._results = None
+        self._score = None
+        self.evaluate_pattern()
+
+    #-------public Getter & Setter methods -------#
+
+    @property
+    def source_line_index (self) -> int:
+        return self._source_index
+    
+    @property
+    def source_line_text (self) -> str:
+        return self._source_text
+
+    @property
+    def high_score_value (self) -> int:
+        """Returns the high score value."""
+        _high_score = None
+        if self._results is not None:
+            for _rl in self._results.values():
+                for _r in _rl:
+                    if _high_score is None:
+                        _high_score = _r[0]
+                    elif _r[0] > _high_score:
+                        _high_score = _r[0]
+        return _high_score if _high_score is not None else -1
+        
+    
+    @property
+    def high_score_pattern_names (self) -> list[str]:
+        """Returns the list of results if found, returns None if none are found"""
+        _high_score_results:list[str] = []
+        if self._results is not None:
+            for _pn, _rl in self._results.items():
+                for _r in _rl:
+                    if _r[0] == self.high_score_value and _pn not in _high_score_results:
+                            _high_score_results.append(_pn)
+        return _high_score_results
+    
+    @property
+    def highest_scoring_results (self) -> dict[str,Any]:
+        """Retunrs teh reuslts of teh highest scoring pattern"""
+        if self._results is not None:
+            for _pn, _rl in self._results.items():
+                for _r in _rl:
+                    if _r[0] == self.high_score_value:
+                        return _r[1].groupdict()
+        return {}
+
+    @property
+    def all_results (self) -> dict[str,list[tuple[int,re.Match]]]:
+        return self._results if self._results is not None else {}
+
+    #------- Methods / Functions -------#
+
+    @ToolBox_Decorator
+    def reset_pattern (self):
+        self._results = None
+        self._score = None
+
+    @ToolBox_Decorator
+    def evaluate_pattern (self):
+        """Will evaluate the assign or provided pattern aginst the stored string."""
+        if self._results is None:
+            self._results = {}
+        for _pattern_name, _pattern in ToolBox_REGEX_Patterns.__members__.items():
+            _results = re.finditer(_pattern, self._source_text, self._flag_val)
+            if _results is not None:
+                if _pattern_name not in self._results.keys():
+                    self._results[_pattern_name] = []
+                _score:int = 0 if (self._bonus_score is None) else self._bonus_score
+                _pattern_name_parts = _pattern_name.split('_')
+                if ((self._filter_patterns is not None) and 
+                    (self._filter_AnyOrAll == ToolBox_Amount_Options.ALL) and 
+                    not (all([_f.upper() in _pattern_name.upper() for _f in self._filter_patterns]))
+                ):
+                    for _f in self._filter_patterns:
+                        if re.search(rf"(?:\b|_){_f}(?:\b|_)", _pattern_name, re.IGNORECASE):
+                            _score += 20
+                elif ((self._filter_patterns is not None) and 
+                    (self._filter_AnyOrAll == ToolBox_Amount_Options.ANY)
+                ):
+                    for _f in self._filter_patterns:
+                        if re.search(rf"(?:\b|_){_f}(?:\b|_)", _pattern_name, re.IGNORECASE):
+                            _score += 15
+                if(self._filter_patterns is not None):
+                    _score -= 5 *len([_pn_w for _pn_w in _pattern_name_parts if all([_pn_w.upper() != _f for _f in self._filter_patterns])])
+                if 'note' in _pattern_name.lower():
+                    _score += 20
+                for _r in _results:
+                    if isinstance(_r, re.Match):
+                        _nonNone_groups = [_grp_v for _grp_v in _r.groupdict().values() if _grp_v is not None and _grp_v.strip() != '']
+                        _None_groups = [_grp_v for _grp_v in _r.groupdict().values() if _grp_v is None or _grp_v.strip() == '']
+                        _reults_len:int = len(_r.groupdict().keys())
+                        if len(_nonNone_groups) >= 1:
+                            _score += 5 * abs(_reults_len-len(_nonNone_groups))
+                        if len(_None_groups) >= 1:
+                            _score -= 5 * abs(len(_None_groups) - _reults_len)
+                        _score += 5 * _reults_len
+                        self._results[_pattern_name].append((_score, _r))
+
+    @ToolBox_Decorator
+    def get_all_Match_results (self) -> list[tuple[str,int,list[tuple[str,Any,tuple[int, int]]]]]:
+        _holder:list[tuple[str,int,list[tuple[str,Any,tuple[int, int]]]]] = []
+        if self._results is not None:
+            for _result_name, _score_data in self._results.items():
+                for _score, _match in _score_data:
+                    _values = []
+                    for _m_id, (_k, _v) in enumerate(_match.groupdict().items()):
+                        _values.append((_k, _v, _match.span(_m_id+1)))
+                    _holder.append((_result_name, _score, _values))
+        return _holder
+
 class ToolBox_REGEX_text_score_evaluator (UserDict):
     #------- public properties -------#
 
@@ -163,7 +245,7 @@ class ToolBox_REGEX_text_score_evaluator (UserDict):
 
     _source_text:str
     _source_lines:list[str]
-    _line_meta_data:dict[int,list[dict[str,Any]]]
+    _score_holder: dict[int,ToolBox_line_score_data]
     _filter_AnyOrAll:ToolBox_Amount_Options|str|None
     _filter_patterns:list[str]|None
     _flag_list:list[re.RegexFlag]|None
@@ -196,57 +278,18 @@ class ToolBox_REGEX_text_score_evaluator (UserDict):
         self._flag_list = flag_list or [re.IGNORECASE]
         if any(_p in source_text for _p in ['\n', '\r']) and re.MULTILINE not in self._flag_list:
             self._flag_list.append(re.MULTILINE)
-        self._line_meta_data = {}    
         self._flag_val:int = sum(self._flag_list)
+        self._score_holder = {}
         for _line_index, _line_str in enumerate(self._source_lines):
-            if _line_index not in self._line_meta_data.keys():
-                self._line_meta_data[_line_index] = []
-            for _pattern_name, _pattern in ToolBox_REGEX_Patterns._member_map_.items():
-                _results = re.finditer(_pattern.value, _line_str, self._flag_val)
-                _score_val:int = 0
-                if _results is not None:
-                    for _r_idx, _r in enumerate(_results):
-                        if ((self._filter_patterns is not None) and 
-                            (self._filter_AnyOrAll == ToolBox_Amount_Options.ALL) and 
-                            not (all([_f.upper() in _pattern_name.upper() for _f in self._filter_patterns]))
-                        ):
-                            _score_val += 20
-                        elif ((self._filter_patterns is not None) and 
-                              (self._filter_AnyOrAll == ToolBox_Amount_Options.ANY) and 
-                              not (any([_f.upper() in _pattern_name.upper() for _f in self._filter_patterns]))
-                        ):
-                            _score_val += 10
-                        if isinstance(_r, re.Match):
-                            _nonNone_groups = [_grp for _grp in _r.groups() if _grp is not None and _grp.strip() != '']
-                            _reults_len:int = len(_r.groups())
-                            if len(_nonNone_groups) >= 1:
-                                _score_val += 5 * abs(_reults_len-len(_nonNone_groups))
-                            else:
-                                _score_val -= 10 *_reults_len
-                            _score_val += 5 * _reults_len
-                            if (self._filter_patterns is not None):
-                                _score_val += 10 * len([_s for _s in self._filter_patterns if _s.upper() in _pattern_name.upper()])
-
-                            _line_word_match_list = [_w for _w in re.finditer(r'\b\w+\b', _line_str)]
-                            _start_word_idx = [_w_idx for _w_idx, _w in enumerate(_line_word_match_list) if _w.start() <= _r.start() <= _w.end()]
-                            if len(_start_word_idx) >= 1:
-                                _score_val += 5 * (len(_line_word_match_list) -_start_word_idx[0])
-                            self._line_meta_data[_line_index].append({
-                                "line_index":_line_index,
-                                "pattern":_pattern,
-                                "pattern_name": _pattern_name,
-                                "groups": _r,
-                                "score":_score_val
-                            })
-            if len(self._line_meta_data[_line_index]) == 0:
-                self._line_meta_data[_line_index].append({
-                    "line_index":_line_index,
-                    "pattern": None,
-                    "pattern_name": None,
-                    "groups": None,
-                    "score": None
-                })
-
+            _pattern_score_obj = ToolBox_line_score_data(
+                source_index= _line_index,
+                source_text= _line_str,
+                filter_patterns=self._filter_patterns,
+                filter_AnyOrAll=self._filter_AnyOrAll,
+                flags=self._flag_list
+            )
+            if _pattern_score_obj.all_results is not None:
+                self._score_holder[_line_index] = _pattern_score_obj
     
     def __setitem__(self, key, value):
         if isinstance(value, str):
@@ -270,90 +313,61 @@ class ToolBox_REGEX_text_score_evaluator (UserDict):
         return self._source_text
     
     @property
-    def statistics (self) -> str:
+    def statistics (self) -> str|None:
         """Returns a string of statistics and results as a multiline string."""
         _stats_text_holder:list[str] = []
-        for _idx in range(len(self._source_lines)):
-            _lind_data =self.get_line_meta_data_by_index(_idx) or []
-            _highest_score:int|None = None
-            _high_score_pattern_list:list[ToolBox_REGEX_Patterns] = []
-            _sub_debug_str:list[str] = []
-            for _md_idx, _md in enumerate(_lind_data):
-                if ('score' in _md.keys() and 'pattern_name' in _md.keys() and 'groups' in _md.keys()):
-                    if (_highest_score is None) or (_md['score'] is not None and _md['score'] > _highest_score):
-                        _highest_score = _md['score']
-                        _high_score_pattern_list = [_md['pattern_name']]
-                    elif (_highest_score is None and _md['score'] is not None and _md['score'] == _highest_score):
-                        _high_score_pattern_list.append(_md['pattern_name'])
-                    _sub_debug_str.append(rf"       {''*len(str(_idx))} [{_md_idx}] Score : [{_md['score']}] - Pattern : '{_md['pattern_name']}' - Group : [{_md['groups'].groups() if _md['groups'] is not None else None}]")
-            _stats_text_holder.append(rf"line [{_idx}] text : '{self._source_lines[_idx]}' | High Score : [{_highest_score}] | Pattern(s) [{len(_high_score_pattern_list)}] : {_high_score_pattern_list}")
-            _stats_text_holder.extend(_sub_debug_str)
-            _stats_text_holder.append('')
+        for _line_idx, _ToolBox_line_score_data in self._score_holder.items():
+            _stats_text_holder.append(rf"line [{_line_idx}] | Score : [{_ToolBox_line_score_data.high_score_value}] | Pattern : {_ToolBox_line_score_data.high_score_pattern_names} | Text : '{_ToolBox_line_score_data.source_line_text}'")
+            if _ToolBox_line_score_data.all_results is not None:
+                for _pn, _pn_d in _ToolBox_line_score_data.all_results.items():
+                    for _score, _match in _pn_d:
+                        _stats_text_holder.append(f"    - '{_pn}' [{_score}] : {_match.groupdict()}")
+                _stats_text_holder.append('')
         if len(_stats_text_holder) >= 1:
             return f"\n".join(_stats_text_holder)
         else:
-            return ''
-    
+            return None
+        
     @property
-    def line_pattern_highest_score_list (self) -> list[tuple[str,int]]:
-        """Returns the a list of patterns and score values of the highest scoring result(s) per line.
-        Multiple patterns may be returned if they have teh same score value."""
-        _pattern_score_list:list[tuple[str,int]] = []
-        for _md_list in self._line_meta_data.values():
-            for _md in _md_list:
-                if ('score' in _md.keys()) and ('pattern' in _md.keys()):
-                    _pattern_score_list.append((_md['pattern'], _md['score']))
-        return _pattern_score_list
+    def all_results (self) -> list[ToolBox_line_score_data]:
+        """Returns a list of ToolBox_line_score_data objects"""
+        return [_sd for _sd in self._score_holder.values()]
     
     #------- Methods / Functions -------#
 
     @ToolBox_Decorator
-    def get_line_by_index (self, line_index:int = 0, clamp_index:bool = True) -> str|None:
-        """Returns the line of text coresponding to the privided index.
-
-        If clamp_index is set to True, then line_index will be set to 0 if below 0 or the last index if above the total number of lines.
-        If clamp_index is set to False, any index outside of 0 to amx number of lines in source text will return None.
+    def get_scores_by_line_index (self, index:int, enable_clamp:bool=True) -> list[ToolBox_line_score_data]:
+        """Returns the score data object that coresponds to the provided index.
+        'enable_clamp' will return the first or last ToolBox_line_score_data object if the value is outside the range of index's found.
         """
-        if clamp_index == True:
-            _line_index = 0 if (line_index < 0) else line_index if (line_index < len(self._source_lines)) else len(self._source_lines)
-        else:
-            _line_index = None if (line_index < 0) else line_index if (line_index < len(self._source_lines)) else None
-        return self._source_lines[_line_index] if _line_index is not None else None
+        _index = max(0, min(index, len(self._score_holder.keys()))) if (enable_clamp == True) else index
+        return [_sd for _sd in self._score_holder.values() if _sd._source_index == _index]
     
-    def get_line_pattern_names_by_index (self, line_index:int = 0, clamp_index:bool = True) -> list[ToolBox_REGEX_Patterns]|None:
-        """Returns the line of text coresponding to the privided index.
-
-        If clamp_index is set to True, then line_index will be set to 0 if below 0 or the last index if above the total number of lines.
-        If clamp_index is set to False, any index outside of 0 to amx number of lines in source text will return None.
-        """
-        if clamp_index == True:
-            _line_index = 0 if (line_index < 0) else line_index if (line_index < len(self._source_lines)) else len(self._source_lines)
-        else:
-            _line_index = None if (line_index < 0) else line_index if (line_index < len(self._source_lines)) else None
-        return self.get_line_patterns()[_line_index] if _line_index is not None else None
-
     @ToolBox_Decorator
-    def get_line_meta_data_by_index (self, line_index:int, clamp_index:bool = True) -> list[dict[str,Any]]|None:
-        """Returns the patterns found for the coresponding index.
-
-        If clamp_index is set to True, then line_index will be set to 0 if below 0 or the last index if above the total number of lines.
-        If clamp_index is set to False, any index outside of 0 to amx number of lines in source text will return None.
-        """
-        if clamp_index == True:
-            _line_index = 0 if (line_index < 0) else line_index if (line_index < len(self._source_lines)) else len(self._source_lines)
-        else:
-            _line_index = None if (line_index < 0) else line_index if (line_index < len(self._source_lines)) else None
-        return self._line_meta_data[_line_index] if _line_index is not None else None
+    def get_scores_by_REGEX_Pattern_name (self, name:str) -> list[ToolBox_line_score_data]:
+        """Returns the score data object that coresponds to the provided index."""
+        _name = name if name in ToolBox_REGEX_Patterns._member_names_ else None
+        return [_sd for _sd in self._score_holder.values() if (
+            (_sd.high_score_pattern_names is not None) and 
+            (_name in _sd.high_score_pattern_names)
+        )] if _name is not None else []
     
-    def get_line_patterns (self) -> list[list[ToolBox_REGEX_Patterns]]:
-        """Returns a list of patterns for each line in source text."""
-        return [_md['pattern'].name for _mdlist in self._line_meta_data.values() for _md in _mdlist]
+    @ToolBox_Decorator
+    def get_closest_to_pattern_and_index (self, name:str, index:int) -> ToolBox_line_score_data|None:
+        """Returns the clostest ToolBox_line_score_data objects to the named REGEX pattern"""
+        _name = name if name in ToolBox_REGEX_Patterns._member_names_ else None
+        return min([_sd for _sd in self._score_holder.values() if (
+            (_sd.high_score_pattern_names is not None) and 
+            (_name in _sd.high_score_pattern_names)
+        )], key=lambda x: abs(index - x.source_line_index)) if _name is not None else None
     
-    def get_line_pattern_scores (self) -> list[list[int]]:
-        """Returns a list of patterns for the coresponding line index."""
-        return [_md['score'] for _mdlist in self._line_meta_data.values() for _md in _mdlist]
-    
-    def get_line_pattern_results (self) -> list[list[re.Match]]:
-        """Returns a list of Matches from the patthern aginst the coresponding line index."""
-        return [_md['groups'] for _mdlist in self._line_meta_data.values() for _md in _mdlist]
-    
+    @ToolBox_Decorator
+    def get_patterns_between_indices (self, name:str, start_index:int, end_index:int) -> list[ToolBox_line_score_data]:
+        """Returns the clostest ToolBox_line_score_data objects to the named REGEX pattern between the given line indicies"""
+        _name = name if name in ToolBox_REGEX_Patterns._member_names_ else None
+        return [_sd for _sd in self._score_holder.values() if (
+            (start_index <= _sd.source_line_index <= end_index) and 
+            (_sd.high_score_pattern_names is not None) and 
+            (_name in _sd.high_score_pattern_names)
+        )] if _name is not None else []
+        

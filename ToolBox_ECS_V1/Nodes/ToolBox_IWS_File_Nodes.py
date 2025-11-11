@@ -3,19 +3,27 @@
 #-------------------------------------------------
 from __future__ import annotations
 
-import os, copy, random, re
+import os, copy, re
 from datetime import datetime
 from typing import Any, Optional, TYPE_CHECKING
 from ToolBox_ECS_V1.ToolBox_Logger import OutputLogger
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Data_Silo import ToolBox_Data_Silo_Manager
 from ToolBox_ECS_V1.Nodes.ToolBox_Base_File_Node import ToolBox_ECS_File_Node
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import (
     ToolBox_Entity_Types,
-    ToolBox_REGEX_Patterns
+    ToolBox_REGEX_Patterns, 
+    ToolBox_Struct_IWS_Stream,
+    ToolBox_Struct_IWS_Job,
+    ToolBox_Struct_Entity_Relationships
 )
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Utils import(
     gen_uuid_key
 )
-from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_IWS_Obj_Node
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Formatters import (
+    ToolBox_line_score_data,
+    ToolBox_REGEX_text_score_evaluator
+)
+from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_Obj_Node
 
 if TYPE_CHECKING:
     from ToolBox_ECS_V1.Nodes.ToolBox_Base_Node import ToolBox_ECS_Node
@@ -46,15 +54,16 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
     #------- public properties -------#
 
     log:OutputLogger = OutputLogger().get_instance()
+    dataSilo:ToolBox_Data_Silo_Manager
     
     #------- private properties -------#
     
     _source_file_text:str|None
     _modified_file_text:str|None
-    
-    _blocks:list[dict[str,Any]]|None
-    _node_dependancies:dict[str,dict[str,str]]|None
-    
+    _modified_line_scores:list[ToolBox_line_score_data]
+    _job_stream_keys:list[str]
+    _job_keys:list[str]
+
     #------- Initialize class -------#
 
     def __init__(
@@ -70,19 +79,83 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
             parent_entitity = parent_entitity,
             initial_data = initial_data
         )
+        self.dataSilo = ToolBox_Data_Silo_Manager().get_instance()
         self._node_type = ToolBox_Entity_Types.FILE_JIL
         self._source_file_text = None
         self._modified_file_text = None
-        self._blocks = []
-        self._node_dependancies = {}
+        self._modified_line_scores = []
+        self._job_stream_keys = []
+        self._job_keys = []
 
     #-------public Getter & Setter methods -------#
 
+    @property
+    def job_stream_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
+        """Returns a list of Job Stream nodes linked to this file."""
+        _holder = []
+        for _k in self._job_stream_keys:
+            _node = self.dataSilo.get(_k)
+            if ((_node is not None) and 
+                isinstance(_node, ToolBox_IWS_Obj_Node) and
+                _node.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM
+            ):
+                _holder.append(_node)
+        return _holder
+    
+    @property
+    def job_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
+        """Returns a list of Job nodes linked to this file."""
+        _holder = []
+        for _k in self._job_keys:
+            _node = self.dataSilo.get(_k)
+            if ((_node is not None) and 
+                isinstance(_node, ToolBox_IWS_Obj_Node) and
+                _node.node_type == ToolBox_Entity_Types.IWS_JOB
+            ):
+                _holder.append(_node)
+        return _holder
+    
+    @property
+    def children (self) -> list[ToolBox_ECS_Node]:
+        """Returns the current list of Children Nodes."""
+        _holder:list[ToolBox_ECS_Node] = []
+        for _key in self._children_keys + self._job_stream_keys + self._job_keys:
+            if self.dataSilo[_key] not in _holder:
+                _holder.append(self.dataSilo[_key])
+        return _holder
+    
 
     #------- Public Methods -------#
+    @ToolBox_Decorator
+    def add_child(self, child: ToolBox_ECS_Node|str):
+        _child:ToolBox_ECS_Node|None = child if isinstance(child, ToolBox_ECS_Node) else self.dataSilo.get(child) if isinstance(child, str) else None
+        if _child is not None:
+            if isinstance(_child, ToolBox_IWS_Obj_Node) and _child.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM:
+                self.add_job_stream_node(_child)
+            elif isinstance(_child, ToolBox_IWS_Obj_Node) and  _child.node_type == ToolBox_Entity_Types.IWS_JOB:
+                self.add_job_node(_child)
+            else:
+                super().add_child(child = child)
 
     @ToolBox_Decorator
-    def open_file (self, quite_logging:bool=True, enable_post_porcesses:bool=True, skip_duplicates=False,):
+    def add_job_stream_node (self, node:ToolBox_IWS_Obj_Node):
+        """Add a Job Stream node to list of links"""
+        if (node.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM and 
+            node.id_key not in self._job_stream_keys
+        ):
+            self._job_stream_keys.append(node.id_key)
+
+    @ToolBox_Decorator
+    def add_job_node (self, node:ToolBox_IWS_Obj_Node):
+        """Add a Job node to list of links"""
+        if (node.node_type == ToolBox_Entity_Types.IWS_JOB and 
+            node.id_key not in self._job_keys
+        ):
+            self._job_keys.append(node.id_key)
+            
+
+    @ToolBox_Decorator
+    def open_file (self, quite_logging:bool=True, enable_post_porcesses:bool=True, skip_duplicates=False):
         """Opens teh Jil file and loads the data as Node objects."""
         if self._is_open != True:
             try:
@@ -94,35 +167,36 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                     self._source_file_text = _holder
                     self._modified_file_text = _holder
                     self._is_open = True
+                    self._has_changed = False
                 else:
                     self.log.warning (f"Unable to read file contents : '{self.relFilePath}'")
                     self._source_file_text = None
                     self._modified_file_text = None
                     self._is_open = False
+                    self._has_changed = False
             except BufferError as errmsg:
                 self.log.warning (f"Unable to open file : '{self.relFilePath}'", data = errmsg)
                 self._source_file_text = None
                 self._modified_file_text = None
                 self._is_open = False
+                self._has_changed = False
             except FileNotFoundError as errmsg:
                 self.log.error (f"File not found : '{self.relFilePath}'")
                 self._source_file_text = None
                 self._modified_file_text = None
                 self._is_open = False
+                self._has_changed = False
             except Exception as e:
                 self.log.warning(f"An unexpected error occurred while reading '{self.sourceFilePath}': {e}")
                 self._source_file_text = None
                 self._modified_file_text = None
                 self._is_open = False
+                self._has_changed = False
         if (enable_post_porcesses == True) and (self._is_open == True):
-            self.decode_source_text(
+            self.split_source_text_to_nodes(
                 source_text= self._source_file_text,
-                skip_duplicates=skip_duplicates,
                 quite_logging=quite_logging
                 )
-            self.convert_text_blocks_to_nodes(
-               overwrite_duplicates=True,
-               quite_logging=quite_logging)
     
     @ToolBox_Decorator
     def close_file (self, quite_logging:bool=True):
@@ -132,325 +206,335 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
             self._is_open = False
             self._source_file_text = None
             self._modified_file_text = None
+            self._modified_line_scores = []
+            self._has_changed = False
     
     @ToolBox_Decorator
-    def save_File (self, outputFolder:str, rename:str|None=None, useRelPath:bool=False,  quite_logging:bool=True):
+    def save_File (self, outputFolder:str, rename:str|None=None, useRelPath:bool=False,  quite_logging:bool=True, skip_unchanged:bool=False):
         """Saves teh current modifications of teh file to the target location."""
-        from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_IWS_Obj_Node
+        if self._has_changed != True and skip_unchanged == True:
+            if (quite_logging != True) : self.log.info (f"File : '{self.relFilePath}' has not been edited, skipping save.")
+            return
+        from ToolBox_ECS_V1.Nodes.ToolBox_IWS_OBJ_Nodes import ToolBox_IWS_Obj_Node
         _outputPath = os.path.join(outputFolder,self.relPath) if useRelPath == True else outputFolder
         os.makedirs(_outputPath, exist_ok=True)
         _filename = rename if rename != None else self.name
         _outputFilePath = os.path.join (_outputPath, f"{_filename}.{self.foramt}")
         if os.path.exists (_outputFilePath):
             os.remove(_outputFilePath)
-        try:
-            _file_text:str|None = None
-            if len(self._children_entities) >= 1:
-                _file_text = """"""
-                _curr_stream_counter = 0
-                for _node in self._children_entities:
-                    if isinstance(_node, ToolBox_IWS_IWS_Obj_Node) and (_node.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM):
-                        if _curr_stream_counter >= 1:
-                            _file_text += '\n\n'
-                        _stream_text = _node.format_as_Job_Stream(
-                            indent = 0,
-                            include_notes = True,
-                            include_jobs = True,
-                            include_end = True
-                        )
-                        if _stream_text:
-                            _file_text += f'{_stream_text}\n'
-                        _curr_stream_counter += 1
-            else:
-                _file_text = self._modified_file_text if self._modified_file_text is not None else None
-            if isinstance(_file_text, str) and _file_text != """""":
-                with open(_outputFilePath, "w") as output_file:
-                    output_file.write(_file_text)
-                if (quite_logging != True) : self.log.info (f"Saved file : '{self.relFilePath}' as file : '{_outputFilePath}'")
-            else:
-                self.log.error (f"Unable to save file expecting'node._source_file_text' to be tpye of literal string, got : ", data=_file_text)
-        except SystemError as se :
-            self.log.error (f"Unable to save file : 'SystemError' : ", data = se)
-        except IOError as ioe:
-            self.log.error (f"Error saving file : 'IOError' :", data = ioe)
+        #try:
+        _file_text:str|None = None
+        if len(self.job_stream_nodes) >= 1:
+            _file_text = ""
+            _curr_stream_counter = 0
+            for _node in self.job_stream_nodes:
+                if _curr_stream_counter >= 1:
+                    _file_text += '\n\n'
+                _stream_text = _node.format_as_Job_Stream(
+                    indent = 0,
+                    include_notes = True,
+                    include_jobs = True,
+                    include_end = True
+                )
+                if _stream_text:
+                    _file_text += f'{_stream_text}\n'
+                _curr_stream_counter += 1
+        else:
+            _file_text = self._modified_file_text if self._modified_file_text is not None else None
+        if isinstance(_file_text, str) and _file_text != "":
+            with open(_outputFilePath, "w") as output_file:
+                output_file.write(_file_text)
+            if (quite_logging != True) : self.log.info (f"Saved file : '{self.relFilePath}' as file : '{_outputFilePath}'")
+        else:
+            self.log.error (f"Unable to save file expecting '{self.relFilePath}' to be tpye of literal string, got : ", data=_file_text)
+        #except SystemError as se :
+        #    self.log.error (f"Unable to save file : 'SystemError' : ", data = se)
+        #except IOError as ioe:
+        #    self.log.error (f"Error saving file : 'IOError' :", data = ioe)
     
     @ToolBox_Decorator
-    def decode_source_text (self, source_text:str|None=None, quite_logging:bool=True, skip_duplicates:bool = False):
-        """breaks the source text into seprate to blocks for further processing, while capturing links between blocks."""
-        
-        from ToolBox_ECS_V1.ToolBox_Manager import ToolBox
-        if (quite_logging != True) : self.log.blank("-"*100)
-        if (quite_logging != True) : self.log.label(f"Decoding IWS Object contents from source file : '{self.relFilePath}'")
-        _source_text = source_text if source_text is not None else self._source_file_text
-        _last_text_block:dict[str,Any]|None = None
-        _curr_text_block:dict[str,Any]|None = None
-        _post_note_block:list[str] = []
-        _curr_stream_block:dict[str,Any]|None = None
-        _last_stream_block:dict[str,Any]|None = None
-        _curr_stream_workstation:str|None = None
-        _curr_stream_folder:str|None = None
-        _curr_stream_name:str|None = None
-        _curr_stream_id_key:str|None = None
-        _curr_stream_full_path:str|None = None
-        _curr_job_block:dict[str,Any]|None = None
-        _curr_job_workstation:str|None = None
-        _curr_job_folder:str|None = None
-        _curr_job_name:str|None = None
-        _curr_job_alias:str|None = None
-        _curr_job_id_key:str|None = None
-        _curr_job_full_path:str|None = None
-        _total_stream_counter:int = 0
-        _total_job_counter:int = 0
-        _curr_stream_index:int = 0
-        _curr_job_index:int = 0
-        _curr_follows_index:int = 0
-        
-        
-        self._blocks = []
-
-        def finalize_text_block ():
-            nonlocal _curr_text_block
-            if _curr_text_block is not None and isinstance(self._blocks, list):
-                self._blocks.append(_curr_text_block)
-                nonlocal _last_text_block
-                _last_text_block = self._blocks[-1]
-                _curr_text_block = None
-                if (quite_logging != True) : self.log.debug(f"Captured text block for type: [{_last_text_block['type']}]"+(f" key: {_last_text_block['data']['id_key']}" if 'id_key' in _last_text_block['data'] else ''))
-
-        def create_new_block (blockType:ToolBox_Entity_Types, line:str):
-            nonlocal _curr_text_block
-            if _curr_text_block is not None:
-                finalize_text_block()
-            _curr_text_block ={
-                "type":blockType,
-                "notes": [],
-                "content":[line.rstrip()],
-                "data": {}
-            }
-            nonlocal _post_note_block
-            _curr_text_block['notes'].extend(_post_note_block)
-            _post_note_block = []
-
-        def add_line_to_content (line:str, autoCreate:bool=False, blockType:ToolBox_Entity_Types|None=None):
-            nonlocal _curr_text_block
-            if (_curr_text_block is not None) and (_curr_text_block['content'] is not None):
-                _curr_text_block['content'].append(line)
-            elif autoCreate == True:
-                _block_type = blockType or ToolBox_Entity_Types.NONE
-                create_new_block(_block_type, line)
-        if _source_text is None:
-            self.log.warning(f"Source file text was 'NoneType' : ", data=self._source_file_text)
-            return
-        for _line  in _source_text.splitlines():
-            # start of job stream definition line, closes current block if open, then starts a new block.
-            # saves a pointer to the last stream block if found and sets the current stream block pointer to the current text block.
-            if (re.match(ToolBox_REGEX_Patterns.IWS_STREAM_START_LINE.value, _line, re.IGNORECASE)):
-                create_new_block(ToolBox_Entity_Types.IWS_JOB_STREAM, _line)
-                if _curr_text_block is None :
-                   continue 
-                _curr_stream_block = _curr_text_block
-                stream_parts_results = re.search(ToolBox_REGEX_Patterns.IWS_STREAM_START_LINE.value, _line, re.IGNORECASE)
-                if stream_parts_results:
-                    _curr_stream_workstation = stream_parts_results.group(1)
-                    _curr_stream_folder = stream_parts_results.group(2)
-                    _curr_stream_name = stream_parts_results.group(3)
-                    _curr_stream_full_path = f"{_curr_stream_workstation}{_curr_stream_folder}{_curr_stream_name}.@"
-                    _curr_stream_key_string = f"{self._source_file_path}|{_curr_stream_full_path}"
-                    _curr_stream_id_key = gen_uuid_key(_curr_stream_key_string)
-                    if (skip_duplicates == False) and _curr_stream_id_key in ToolBox:
-                        _rand_key = str(random.randrange(1000000000))
-                        _curr_text_block['data']["random_key"] = _rand_key
-                        _curr_stream_key_string = f"{self._source_file_path}|{_curr_stream_full_path}|{_rand_key}"
-                        _rand_curr_stream_id_key = gen_uuid_key(_curr_stream_key_string)
-                        self.log.warning (f"Key [{_curr_stream_id_key}] was already assigned in ECS system, generating random key: [{_rand_curr_stream_id_key}]")
-                        _curr_stream_id_key = _rand_curr_stream_id_key
-                    elif skip_duplicates == True:
-                        continue
-                    _curr_text_block['data']['id_key'] = _curr_stream_id_key
-                    _curr_text_block['data']['key_string'] = _curr_stream_key_string
-                    _curr_text_block['data']['full_path'] = _curr_stream_full_path
-                    _curr_text_block['data']['stream_order_index'] = _curr_stream_index
-                    _total_stream_counter += 1
-                    _curr_stream_index += 1
-                continue
-            # Edge line of the current Stream Block marked by ':' in source text.
-            # Adds the line to the current block, then closes current block.
-            if (re.match(ToolBox_REGEX_Patterns.IWS_STREAM_EDGE_LINE.value, _line, re.IGNORECASE)):
-                add_line_to_content(_line)
-                continue
-            # Start of Job definition line, saves pointer to last Job def if found, and sets the current Job pointer
-            if (re.match(ToolBox_REGEX_Patterns.IWS_JOB_START_LINE.value, _line, re.IGNORECASE)):
-                create_new_block(ToolBox_Entity_Types.IWS_JOB, _line)
-                if _curr_text_block is None :
-                   continue 
-                _curr_job_block = _curr_text_block
-                _job_parts_results = re.search(ToolBox_REGEX_Patterns.IWS_JOB_START_LINE.value, _line, re.IGNORECASE)
-                if _job_parts_results:
-                    _curr_job_workstation = _job_parts_results.group(1)
-                    _curr_job_folder = _job_parts_results.group(2)
-                    _curr_job_name = _job_parts_results.group(3)
-                    _curr_job_alias = _job_parts_results.group(5)
-                    _curr_job_full_path = ''
-                    if (_curr_job_workstation.upper() == _curr_stream_workstation.upper()) and (_curr_job_folder.upper() == _curr_stream_folder.upper()):
-                        _curr_job_full_path += f"{_curr_stream_workstation}{_curr_stream_folder}{_curr_stream_name}."
-                    else:
-                        _curr_job_full_path += f"{_curr_job_workstation}{_curr_job_folder}"
-                    _curr_job_full_path += _curr_job_alias if _job_parts_results.group(5) else _curr_job_name
-                    _curr_job_key_string = f"{self._source_file_path}|{_curr_job_full_path}"
-                    _curr_job_id_key = gen_uuid_key(_curr_job_key_string)
-                    if (skip_duplicates == False) and _curr_job_id_key in ToolBox:
-                        _rand_key = str(random.randrange(1000000000))
-                        _curr_text_block['data']["random_key"] = _rand_key
-                        _curr_job_key_string = f"{self._source_file_path}|{_curr_job_full_path}|{_rand_key}"
-                        _rand_curr_job_id_key = gen_uuid_key(_curr_job_key_string)
-                        self.log.warning (f"Key [{_curr_job_id_key}] was already assigned in ECS system, generating random key: [{_rand_curr_job_id_key}]")
-                        _curr_job_id_key = _rand_curr_job_id_key
-                    elif skip_duplicates == True:
-                        continue
-                    _curr_text_block['data']['id_key'] = _curr_job_id_key
-                    _curr_text_block['data']['key_string'] = _curr_job_key_string
-                    _curr_text_block['data']['full_path'] = _curr_job_full_path
-                    _curr_text_block['data']['parent_path'] = _curr_stream_full_path
-                    _curr_text_block['data']['parent_key'] = _curr_stream_id_key
-                    _curr_text_block['data']['job_order_index'] = _curr_job_index
-                    _total_job_counter += 1
-                    _curr_job_index += 1
-                continue
-            # First blank line after the start of a job definition has been found.
-            # close current block
-            if (re.match(ToolBox_REGEX_Patterns.BLANK_LINE.value, _line, re.IGNORECASE) and
-                (_curr_text_block is not None) and
-                ('type' in _curr_text_block.keys()) and
-                (_curr_text_block['type'].upper() == ToolBox_Entity_Types.IWS_JOB.value.upper())):
-                finalize_text_block()
-                _curr_job_workstation = None
-                _curr_job_folder = None
-                _curr_job_name = None
-                _curr_job_alias = None
-                _curr_job_id_key = None
-                _curr_job_full_path = None
-                _curr_job_index = 0
-                continue
-            # End of current Job Stream block, will close out current block if the current block is a job or the current job stream.
-            # will add current line to last known Strem block.
-            if (re.match(ToolBox_REGEX_Patterns.IWS_STREAM_END_LINE.value, _line, re.IGNORECASE) and
-                (_curr_stream_block is not None) and
-                (_curr_stream_full_path is not None)):
-                if (_curr_job_block is not None) and (_curr_text_block == _curr_job_block):
-                    finalize_text_block()
-                if (_curr_stream_block is not None) and (_curr_stream_block['content'] is not None):
-                    _curr_stream_block['content'].append(_line)
-                _last_stream_block = _curr_stream_block
-                _curr_stream_block = None
-                _curr_stream_workstation = None
-                _curr_stream_folder = None
-                _curr_stream_name = None
-                _curr_stream_id_key = None
-                _curr_stream_full_path = None
-                _curr_job_workstation = None
-                _curr_job_folder = None
-                _curr_job_name = None
-                _curr_job_alias = None
-                _curr_job_id_key = None
-                _curr_job_full_path = None
-                _curr_stream_index = 0
-                _curr_job_index = 0
-                continue
-            # Line is a Note line that starts with a '#', will add to current block if one is found.
-            # If no block is found, will save for next block in file or appends to the last block if no more are found.
-            if (re.match(ToolBox_REGEX_Patterns.NOTE_LINE.value, _line, re.IGNORECASE) 
-            ):
-                if (_curr_text_block is None):
-                    _post_note_block.append(_line)
-                    continue
-            # all else fails, add line to current block or notes for next block.
-            if (_line.strip() != '') and (_curr_text_block is not None):
-                add_line_to_content(_line)
-            elif (_line.strip() != ''):
-                _post_note_block.append(_line)
-        # Add any post notes to last block in stack.
-        if len(self._blocks) >= 1 and len(_post_note_block) and isinstance(self._blocks, list) >= 1 and _last_stream_block is not None:
-            _last_block = self._blocks[self._blocks.index(_last_stream_block)] if _last_stream_block in self._blocks else None
-            if isinstance(_last_block, dict) and "post_notes" not in _last_block.keys():
-                _last_block["post_notes"] = []
-            elif isinstance(_last_block['post_notes'], list):
-                _last_block["post_notes"].extend(_post_note_block)
-    
-    @ToolBox_Decorator
-    def convert_text_blocks_to_nodes (self, quite_logging:bool = False, overwrite_duplicates:bool=False):
-        """Adds stored nodes to ECS system"""
-        from ToolBox_ECS_V1.ToolBox_Manager import ToolBox
-        if isinstance(self._blocks, list) and len(self._blocks) >= 1:
-            _stream_blocks:list[dict[str,Any]] = []
-            _job_blocks:list[dict[str,Any]] = []
-            _other_blocks:list[dict[str,Any]] = []
-            # split blocks into Groups for ordered processing
-            
-            for _idx in range(len(self._blocks)):
-                _curr_block_type:ToolBox_Entity_Types = self._blocks[_idx]['type']
-                if _curr_block_type == ToolBox_Entity_Types.IWS_JOB_STREAM:
-                    _stream_blocks.append(self._blocks[_idx])
-                elif _curr_block_type == ToolBox_Entity_Types.IWS_JOB:
-                    _job_blocks.append(self._blocks[_idx])
+    def split_source_text_to_nodes (self, source_text:str|None=None, quite_logging:bool=True):
+        if (quite_logging != True) : self.log.debug(f"Decoding IWS configuration text from source file : '{self.relFilePath}' to Node Objects")
+        if self._is_open == True and isinstance(self._modified_file_text,str):
+            _source_text = source_text if source_text is not None else self._modified_file_text
+            _lines:list[str] = self._modified_file_text.splitlines()
+            _score_evals = ToolBox_REGEX_text_score_evaluator ( 
+                source_text = _source_text,
+                filter_patterns = ['IWS', 'LINE'],
+                filter_AnyOrAll = 'ANY'
+                )
+            _stream_start_scores = _score_evals.get_scores_by_REGEX_Pattern_name(ToolBox_REGEX_Patterns.IWS_STREAM_START_LINE.name)
+            _last_end_index:int = -1
+            _stream_counter:int = 0
+            _job_counter:int = 0
+            _total_counter:int = 0
+            for _js_idx in range (len(_stream_start_scores)):
+                _js_line_data = _stream_start_scores[_js_idx]
+                _js_ws = _js_line_data.highest_scoring_results['workstation'] or None
+                _js_f = _js_line_data.highest_scoring_results['folder'] or None
+                _js_name = _js_line_data.highest_scoring_results['stream'] or None
+                _js_key_string = f"{self._source_file_path}|{_js_ws}{_js_f}{_js_name}.@"
+                _js_key_id = gen_uuid_key(_js_key_string)
+                _js_new_node = ToolBox_IWS_Obj_Node(
+                    id_key = _js_key_id,
+                    name= _js_name,
+                    object_type = ToolBox_Entity_Types.IWS_JOB_STREAM,
+                    parent_entitity= None,
+                    initial_data = None
+                )
+                _js_new_node.sourceFile_Path = self.sourceFilePath
+                _js_new_node.sourceFile_Object = self
+                
+                if _js_idx != 0:
+                    _start_index = _js_line_data.source_line_index if _last_end_index == -1 else _last_end_index
                 else:
-                    _other_blocks.append(self._blocks[_idx])
-            if (quite_logging != True) : self.log.debug (f"Found a Total of [{len(_stream_blocks)}] Job Stream Blocks")
-            if (quite_logging != True) : self.log.debug (f"Found a Total of [{len(_job_blocks)}] Job Blocks")
-            if (quite_logging != True) and len(_other_blocks) >= 1: self.log.debug (f"Total Blocks unable to filter : [{len(_other_blocks)}]")
+                    _start_index = 0
+                _last_line_index:int = _stream_start_scores[_js_idx+1].source_line_index if _js_idx < len(_stream_start_scores)-1 else len(_lines)
+                _closest_edge = _score_evals.get_closest_to_pattern_and_index(ToolBox_REGEX_Patterns.IWS_STREAM_EDGE_LINE.name, _js_line_data.source_line_index)
+                _closest_end = _score_evals.get_closest_to_pattern_and_index(ToolBox_REGEX_Patterns.IWS_STREAM_END_LINE.name, _last_line_index)
+                _stream_text_block:list[str] = copy.deepcopy(_lines[_start_index : _closest_edge.source_line_index+1]) if _closest_edge is not None else _lines[_start_index : _closest_end.source_line_index+1] if _closest_end is not None else _lines[_start_index: ]
+                if _closest_end is not None and _closest_end.source_line_index > _js_line_data.source_line_index:
+                    _last_end_index = max(_last_end_index, _closest_end.source_line_index+1)
+                    _stream_text_block.append(_closest_end.source_line_text)
+                else:
+                    _last_end_index = max(_last_end_index, len(_lines))
+                _js_new_node.sourceFile_Text = '\n'.join(_stream_text_block)
+                self.dataSilo.append_node(_js_new_node)
+                self._job_stream_keys.append(_js_new_node.id_key)
+                _stream_counter += 1
+                if (quite_logging != True) : self.log.debug (f"[{_stream_counter}|0] Adding node [{_js_new_node.id_key}] [{_js_new_node.node_type}] - '{_js_new_node.full_path}'")
 
-            # Process all Job Stream Blocks
-            for _streamBlock in _stream_blocks:
-                _curr_stream_type:ToolBox_Entity_Types = _streamBlock['type']
-                _curr_stream_notes:str|None = '\n'.join([_l.rstrip() for _l in _streamBlock['notes']]) if len(_streamBlock['notes']) != 0 else None
-                _curr_stream_content:str = '\n'.join(_l.rstrip() for _l in _streamBlock['content'])    
-                _curr_stream_data:dict[str,Any] = _streamBlock['data']
-                _curr_stream_node = ToolBox_IWS_IWS_Obj_Node(
-                    id_key = _curr_stream_data['id_key'],
-                    object_type = _curr_stream_type,
-                    parent_entitity = None,
-                    initial_data = _curr_stream_data
-                )
-                _curr_stream_node.sourceFile_Object = self
-                _curr_stream_node.sourceFile_Text = (f"{_curr_stream_notes}\n\n" if _curr_stream_notes is not None else "") + _curr_stream_content
-                _curr_stream_post_notes:str|None = '\n'.join([_l.rstrip() for _l in _streamBlock['post_notes']]) if 'post_notes' in _streamBlock.keys() else None
-                if _curr_stream_post_notes is not None:
-                    _curr_stream_node.sourceFile_Text = (_curr_stream_node.sourceFile_Text or "") + f"\n\n{_curr_stream_post_notes}"
-                _curr_stream_node.sourceFile_Object = self
-                _curr_stream_node.sourceFile_Path = self.sourceFilePath    
-                if (quite_logging != True) : self.log.debug (f"Adding Node : [{_curr_stream_node.id_key}] - '{_curr_stream_node.object_type}' defined in file '{_curr_stream_node.sourceFile_Object.relFilePath}' as '{_curr_stream_node.full_path}'")#, data=_curr_stream_node._source_file_text.splitlines(), list_data_as_table=True, column_count=1 )
-                ToolBox.insert_node_object(node = _curr_stream_node, overwrite_node = overwrite_duplicates)
-                if _curr_stream_node not in self._children_entities:
-                    self._children_entities.append(_curr_stream_node)
-            # Process all Job Stream Blocks
-            for _jobBlock in _job_blocks:
-                _curr_job_type:ToolBox_Entity_Types = _jobBlock['type']
-                _curr_job_notes:str|None = '\n'.join([_l.rstrip() for _l in _jobBlock['notes']]) if len(_jobBlock['notes']) != 0 else None
-                _curr_job_content:str = '\n'.join(_l.rstrip() for _l in _jobBlock['content'])    
-                _curr_job_data:dict[str,Any] = _jobBlock['data']
-                _curr_job_node = ToolBox_IWS_IWS_Obj_Node(
-                    id_key = _curr_job_data['id_key'],
-                    object_type = _curr_job_type,
-                    parent_entitity = None,
-                    initial_data = _curr_job_data
-                )
-                _curr_job_node.sourceFile_Object = self
-                _curr_job_node.sourceFile_Text = (f"{_curr_job_notes}\n\n" if _curr_job_notes is not None else "") + _curr_job_content
-                _curr_job_post_notes:str|None = '\n'.join([_l.rstrip() for _l in _jobBlock['post_notes']]) if 'post_notes' in _jobBlock.keys() else None
-                if _curr_job_post_notes is not None:
-                    _curr_job_node.sourceFile_Text = (_curr_job_node.sourceFile_Text or "") + f'\n\n{_curr_job_post_notes}'
-                _curr_job_node.sourceFile_Path = self.sourceFilePath    
-                if (quite_logging != True) : self.log.debug (f"Adding Node : [{_curr_job_node.id_key}] - '{_curr_job_node.object_type}' defined in file '{_curr_job_node.sourceFile_Object.relFilePath}' as '{_curr_job_node.full_path}'")#, data=_curr_job_node._source_file_text.splitlines(), list_data_as_table=True, column_count=1 )
-                ToolBox.insert_node_object(node = _curr_job_node, overwrite_node = overwrite_duplicates)
-                if _curr_job_node not in self._children_entities:
-                    self._children_entities.append(_curr_job_node)
-                if ('parent_key' in _curr_job_data.keys()) and (_curr_job_data['parent_key'] is not None):
-                    _source_key = _curr_job_data['parent_key']
-                    if (_source_key is None):
-                        self.log.warning (f"Source Key was not provided,  please set 'source_key' key in object.")
-                    else:
-                        _source_node = ToolBox[_source_key] if _source_key in ToolBox else None
-                        if ((_source_node is not None) and (isinstance(_source_node, ToolBox_IWS_IWS_Obj_Node))):
-                            _source_node.add_child(_curr_job_node)
-                            if (quite_logging != True) : self.log.debug (f"Attaching Job node : '{_curr_job_node.deffined_path}' to its parent Job Stream node : '{_source_node.full_path if hasattr(_source_node, 'full_path') else _source_node.name}'")
+                if (_closest_edge is not None and
+                    _js_line_data.source_line_index <_closest_edge.source_line_index < _last_line_index - 1
+                ):
+                    _job_start_scores = _score_evals.get_patterns_between_indices(ToolBox_REGEX_Patterns.IWS_JOB_START_LINE.name, _closest_edge.source_line_index, _last_end_index)
+                    _last_job_stop_line_index:int|None = None
+                    for _j_idx in range(len(_job_start_scores)):
+                        _j_line_data = _job_start_scores[_j_idx]
+                        _j_start_line_index = _last_job_stop_line_index if _last_job_stop_line_index is not None else _j_line_data.source_line_index 
+                        _j_end_line_index = _job_start_scores[_j_idx+1].source_line_index if _j_idx < len(_job_start_scores)-1 else _last_end_index - 1
+                        _blank_line_scores = _score_evals.get_patterns_between_indices(ToolBox_REGEX_Patterns.BLANK_LINE.name, _j_start_line_index, _j_end_line_index)
+                        _first_blank_line_ids = min([_idx.source_line_index for _idx in _blank_line_scores if _idx.source_line_index > _j_line_data.source_line_index ])
+                        _job_text_block = copy.deepcopy(_lines[_j_start_line_index:_first_blank_line_ids])
+                        if (_last_job_stop_line_index is None) or (_first_blank_line_ids > _last_job_stop_line_index):
+                            _last_job_stop_line_index = _first_blank_line_ids
+                        _j_ws = _j_line_data.highest_scoring_results['workstation'] or None
+                        _j_f = _j_line_data.highest_scoring_results['folder'] or None
+                        _j_name = _j_line_data.highest_scoring_results['job'] or None
+                        _j_alias = _j_line_data.highest_scoring_results['alias'] or None
+                        if _j_alias is not None:
+                            _j_key_string = f"{self._source_file_path}|{_j_ws}{_j_f}{_js_name}.{_j_alias}"
                         else:
-                            self.log.warning (f"Unable to find node for Source Key : '{_source_key}'")
+                            _j_key_string = f"{self._source_file_path}|{_j_ws}{_j_f}{_js_name}.{_j_name}"
+                        _j_key_id = gen_uuid_key(_j_key_string)
+                        _j_new_node = ToolBox_IWS_Obj_Node(
+                            id_key = _j_key_id,
+                            name=_j_name,
+                            object_type = ToolBox_Entity_Types.IWS_JOB,
+                            parent_entitity= _js_new_node,
+                            initial_data = None
+                        )
+                        _j_new_node._node_type = ToolBox_Entity_Types.IWS_JOB
+                        _j_new_node.sourceFile_Path = self.sourceFilePath
+                        _j_new_node.sourceFile_Object = self
+                        _j_new_node.sourceFile_Text = '\n'.join(_job_text_block)
+                        self.dataSilo.append_node(_j_new_node)
+                        self._job_keys.append(_j_new_node.id_key)
+                        _js_new_node.add_child(_j_new_node)
+                        _total_counter +=1
+                        if (quite_logging != True) : self.log.debug (f"[{_stream_counter}|{_job_counter}] Adding node [{_j_new_node.id_key}] [{_j_new_node.node_type}] - '{_j_new_node.full_path}'")
+            if (quite_logging != True) : self.log.info (f"Added [{_total_counter}] Nodes | [{_stream_counter}] Streams | [{_job_counter}] Jobs")
+        if (quite_logging != True) : self.log.blank("-"*100)
+
+    @ToolBox_Decorator
+    def get_Job_Stream_Start_lines (self) -> list[tuple[int,str]]:
+        _line_holder:list[tuple[int,str]] = []
+        if self._modified_file_text is not None:
+            for _line_idx, _line in enumerate(self._modified_file_text.splitlines()):
+                if re.match(ToolBox_REGEX_Patterns.IWS_STREAM_START_LINE, _line):
+                    _line_holder.append((_line_idx,_line))
+        return _line_holder
+    
+    @ToolBox_Decorator
+    def get_Job_Stream_Edge_lines (self) -> list[tuple[int,str]]:
+        _line_holder:list[tuple[int,str]] = []
+        if self._modified_file_text is not None:
+            for _line_idx, _line in enumerate(self._modified_file_text.splitlines()):
+                if re.match(ToolBox_REGEX_Patterns.IWS_STREAM_EDGE_LINE, _line):
+                    _line_holder.append((_line_idx,_line))
+        return _line_holder
+    
+    @ToolBox_Decorator
+    def get_Job_Stream_End_lines (self) -> list[tuple[int,str]]:
+        _line_holder:list[tuple[int,str]] = []
+        if self._modified_file_text is not None:
+            for _line_idx, _line in enumerate(self._modified_file_text.splitlines()):
+                if re.match(ToolBox_REGEX_Patterns.IWS_STREAM_END_LINE, _line):
+                    _line_holder.append((_line_idx,_line))
+        return _line_holder
+    
+    @ToolBox_Decorator
+    def get_ON_RUNCYCLE_lines (self) -> list[tuple[int,str]]:
+        _line_holder:list[tuple[int,str]] = []
+        if self._modified_file_text is not None:
+            for _line_idx, _line in enumerate(self._modified_file_text.splitlines()):
+                if re.match(ToolBox_REGEX_Patterns.IWS_ON_RUNCYCLE_GROUP_LINE, _line):
+                    _line_holder.append((_line_idx,_line))
+                if re.match(ToolBox_REGEX_Patterns.IWS_ON_RUNCYCLE_FREQ_LINE, _line):
+                    _line_holder.append((_line_idx,_line))
+        return _line_holder
+    
+    @ToolBox_Decorator
+    def get_Job_Start_lines (self) -> list[tuple[int,str]]:
+        _line_holder:list[tuple[int,str]] = []
+        if self._modified_file_text is not None:
+            for _line_idx, _line in enumerate(self._modified_file_text.splitlines()):
+                if re.match(ToolBox_REGEX_Patterns.IWS_JOB_START_LINE, _line):
+                    _line_holder.append((_line_idx,_line))
+        return _line_holder
+    
+
+    @ToolBox_Decorator
+    def load_contents_as_entities (self, quite_logging:bool=True, enable_post_porcesses:bool=True, skip_duplicates=False):
+        """Opens teh Jil file and loads the data as Node objects."""
+        if self._is_open != True:
+            try:
+                _holder = None
+                with open(self.sourceFilePath, "r", encoding="utf-8") as f:
+                    _holder = copy.deepcopy(f.read())
+                if (_holder is not None):
+                    if (quite_logging != True) : self.log.info (f"Opening source file : '{self.relFilePath}'")
+                    self._source_file_text = _holder
+                    self._modified_file_text = _holder
+                    self._is_open = True
+                    self._has_changed = False
+                else:
+                    self.log.warning (f"Unable to read file contents : '{self.relFilePath}'")
+                    self._source_file_text = None
+                    self._modified_file_text = None
+                    self._is_open = False
+                    self._has_changed = False
+            except BufferError as errmsg:
+                self.log.warning (f"Unable to open file : '{self.relFilePath}'", data = errmsg)
+                self._source_file_text = None
+                self._modified_file_text = None
+                self._is_open = False
+                self._has_changed = False
+            except FileNotFoundError as errmsg:
+                self.log.error (f"File not found : '{self.relFilePath}'")
+                self._source_file_text = None
+                self._modified_file_text = None
+                self._is_open = False
+                self._has_changed = False
+            except Exception as e:
+                self.log.warning(f"An unexpected error occurred while reading '{self.sourceFilePath}': {e}")
+                self._source_file_text = None
+                self._modified_file_text = None
+                self._is_open = False
+                self._has_changed = False
+        if (enable_post_porcesses == True) and (self._is_open == True):
+            self.convert_text_to_entities ()
+
+
+    @ToolBox_Decorator
+    def convert_text_to_entities (self,
+        quite_logging:bool=True
+    ):        
+        if (quite_logging != True) : self.log.debug(f"Decoding IWS configuration text from source file : '{self.relFilePath}' to Entities")  
+        if self._is_open == True and self._modified_file_text is not None:
+            self._modified_line_scores = []
+            _curr_stream_entity:str|None = None
+            _curr_job_entity:str|None = None
+            _last_stream_entity:str|None = None
+            _last_job_entity:str|None = None
+            _curr_stream_data:dict[str,Any]|None = None
+            _curr_job_data:dict[str,Any]|None = None
+            _curr_stream_notes:list[str]|None = None
+            for _line_idx, _line_str in enumerate(self._modified_file_text.splitlines()):
+                _line_score = ToolBox_line_score_data(
+                    source_index= _line_idx,
+                    source_text= _line_str,
+                    filter_patterns=['IWS', 'LINE'],
+                    filter_AnyOrAll= 'Any',
+                    flags=[re.IGNORECASE]
+                )
+                self._modified_line_scores.append(_line_score)
+                if (ToolBox_REGEX_Patterns.NOTE_LINE.name in _line_score.high_score_pattern_names):
+                    if _curr_stream_notes is None:
+                        _curr_stream_notes = []
+                    _curr_stream_notes.append(_line_str)
+                if (ToolBox_REGEX_Patterns.IWS_STREAM_START_LINE.name in _line_score.high_score_pattern_names):
+                    if _curr_stream_data is not None:
+                        _last_stream_entity = _curr_stream_entity
+                        _curr_stream_entity = self.dataSilo.create_entity(
+                            key_id = _curr_stream_data['_hash'] or None,
+                            components = _curr_stream_data
+                        )
+                        _curr_stream_data = None
+                    if _curr_stream_data is None:
+                        _curr_stream_data = {}
+                    for _result_list in _line_score.all_results.values():
+                        for _score, _match in _result_list:
+                            _found_results = _match.groupdict()
+                            if all (_k in _found_results.keys() for _k in ['workstation', 'folder', 'stream']):
+                                _curr_stream_data['source_file'] = self.sourceFilePath
+                                _curr_stream_data['obj_type'] = ToolBox_Entity_Types.IWS_JOB_STREAM
+                                _curr_stream_data['workstation'] = _found_results['workstation'] or None
+                                _curr_stream_data['folder'] = _found_results['folder'] or None
+                                _curr_stream_data['name'] = _found_results['stream'] or None
+                                _uuid_string = f"{self.sourceFilePath}|{_curr_stream_data['workstation']}{_curr_stream_data['folder']}{_curr_stream_data['name']}.@"
+                                _curr_stream_data['_hash'] = gen_uuid_key(_uuid_string)
+                                if _curr_stream_notes is not None:
+                                    _curr_stream_data['pre_notes'] = '\n'.join(_curr_stream_notes)
+                                    _curr_stream_notes = None
+                if (ToolBox_REGEX_Patterns.IWS_JOB_START_LINE.name in _line_score.high_score_pattern_names):
+                    if _curr_job_data is not None:
+                        _last_job_entity = _curr_job_entity
+                        _curr_job_entity = self.dataSilo.create_entity(
+                            key_id = _curr_job_data['_hash'] or None,
+                            components = _curr_job_data)
+                        _curr_job_data = None
+                    if _curr_job_data is None:
+                        _curr_job_data = {}
+                    for _result_list in _line_score.all_results.values():
+                        for _score, _match in _result_list:
+                            _found_results = _match.groupdict()
+                            if all (_k in _found_results.keys() for _k in ['workstation', 'folder', 'job', 'alias']):
+                                _curr_job_data['source_file'] = self.sourceFilePath
+                                _curr_job_data['obj_type'] = ToolBox_Entity_Types.IWS_JOB
+                                _curr_job_data['workstation'] = _found_results['workstation'] or None
+                                _curr_job_data['folder'] = _found_results['folder'] or None
+                                _curr_job_data['name'] = _found_results['job'] or None
+                                _curr_job_data['alias'] = _found_results['alias'] or None
+                                if (_curr_stream_data is not None and 
+                                    'workstation' in _curr_stream_data.keys() and 
+                                    'folder' in _curr_stream_data.keys() and
+                                    'name' in _curr_stream_data.keys()
+                                    ):
+                                    _uuid_string = f"{self.sourceFilePath}|{_curr_job_data['workstation']}{_curr_job_data['folder']}{_curr_stream_data['name']}."
+                                    _curr_job_data['parent_stream_key'] = _curr_stream_entity
+                                    if 'jobs' not in _curr_stream_data.keys():
+                                        _curr_stream_data['job_keys'] = []
+                                    _curr_stream_data['job_keys'].append(_curr_job_entity)
+                                else:
+                                    _uuid_string = f"{self.sourceFilePath}|{_curr_job_data['workstation']}{_curr_job_data['folder']}"
+                                _uuid_string += f"{_curr_job_data['alias']}" if _curr_job_data['alias'] is not None else f"{_curr_job_data['name']}"
+                                
+                                _curr_job_data['_hash'] = gen_uuid_key(_uuid_string)
+                                if _curr_stream_notes is not None:
+                                    _curr_job_data['pre_notes'] = '\n'.join(_curr_stream_notes)
+                                    _curr_stream_notes = None
+                if (ToolBox_REGEX_Patterns.BLANK_LINE.name in _line_score.high_score_pattern_names):
+                    if _curr_job_data is not None:
+                        _last_job_entity = _curr_job_entity
+                        _curr_job_entity = None
+                        _curr_job_data = None
+
+                if (ToolBox_REGEX_Patterns.IWS_STREAM_END_LINE.name in _line_score.high_score_pattern_names):
+                    if _curr_stream_entity is not None:
+                        _last_stream_entity = _curr_stream_entity
+                        _curr_stream_entity = None
+                        _curr_stream_data = None
+                
+                        
+    

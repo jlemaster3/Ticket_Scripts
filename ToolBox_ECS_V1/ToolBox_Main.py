@@ -6,14 +6,19 @@ from datetime import datetime
 from typing import Optional, Literal, Callable, Any
 
 from ToolBox_ECS_V1.ToolBox_Logger import OutputLogger
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Data_Silo import *
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Filters import *
 from ToolBox_ECS_V1.Shared_Utils.ToolBox_Types import (
     ToolBox_Amount_Options,
     ToolBox_File_Types, 
     ToolBox_Entity_Types, 
-    ToolBox_REGEX_Patterns
+    ToolBox_REGEX_Patterns,
+    ToolBox_Struct_Entity_Relationships,
+    ToolBox_Struct_IWS_Stream,
+    ToolBox_Struct_IWS_Job  
 )
-from ToolBox_ECS_V1.Shared_Utils.ToolBox_Formatters import ToolBox_list_of_dictionaries_to_string as _list_of_rows_to_Strings
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Timezones import ToolBox_Timezone_Patterns
+from ToolBox_ECS_V1.Shared_Utils.ToolBox_Formatters import ToolBox_list_of_dictionaries_to_table as _list_of_rows_to_Strings
 from ToolBox_ECS_V1.Nodes import *
 
 #-------------------------------------------------
@@ -35,18 +40,30 @@ class ToolBox_Manager :
     #------- public properties -------#
 
     log:OutputLogger = OutputLogger().get_instance()
+    dataSilo:ToolBox_Data_Silo_Manager = ToolBox_Data_Silo_Manager.get_instance()
 
     # Using imported types from ToolBox_Types
     File_Types = ToolBox_File_Types
     Entity_Types = ToolBox_Entity_Types
     Amount_Options = ToolBox_Amount_Options
     REGEX_Patterns = ToolBox_REGEX_Patterns
+    TimeZone_Patterns = ToolBox_Timezone_Patterns
+    IWS_struct_relationships = ToolBox_Struct_Entity_Relationships
+    IWS_struct_Stream = ToolBox_Struct_IWS_Stream
+    IWS_struct_Job = ToolBox_Struct_IWS_Job
 
     #------- private properties -------#
     _instance = None
     _lock = threading.Lock()
 
     _nodes:dict[str, ToolBox_ECS_Node] = {}
+
+    _IWS_nodes:dict[str,dict[str, ToolBox_IWS_Obj_Node]] = {
+        "unsorted":{},
+        "Job_Streams":{},
+        "Jobs":{},
+        
+    }
 
     #------- Initialize class -------#
 
@@ -59,18 +76,18 @@ class ToolBox_Manager :
     
     def __setitem__(self, key:str, value:ToolBox_ECS_Node):
         if isinstance(value, str):
-            self._nodes[key] = value
+            self.dataSilo[key] = value
         else:
-            self._nodes[key] = value
+            self.dataSilo[key] = value
 
     def __getitem__(self, key:str):
         if isinstance(key, str):
             key = key
-        return self._nodes[key]
+        return self.dataSilo[key]
     
     def __len__(self):
         """Returns the total number of nodes contained."""
-        return len(self._nodes.keys())
+        return len(self.dataSilo)
     
     def __contains__(self, item:str|ToolBox_ECS_Node):
         """
@@ -99,7 +116,8 @@ class ToolBox_Manager :
     @property
     def nodes (self) -> list[ToolBox_ECS_Node]:
         """Returns this a list of all Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_Node)]
+        return self.dataSilo.nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_Node)]
     
     @property
     def node_keys (self) -> list[str]:
@@ -109,7 +127,8 @@ class ToolBox_Manager :
     @property
     def file_nodes (self) -> list[ToolBox_ECS_File_Node]:
         """Returns this a list of all File Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_File_Node)]
+        return self.dataSilo.file_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_File_Node)]
     
     @property
     def file_node_keys (self) -> list[str]:
@@ -119,7 +138,8 @@ class ToolBox_Manager :
     @property
     def JIL_file_nodes (self) -> list[ToolBox_IWS_JIL_File_Node]:
         """Returns this a list of all *.jil or *.job File Nodes"""
-        return [_n for _n in self._nodes.values() if (isinstance(_n, ToolBox_IWS_JIL_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_JIL or _n.node_type == ToolBox_Entity_Types.FILE_JOB))]
+        return self.dataSilo.JIL_file_nodes
+        #return [_n for _n in self._nodes.values() if (isinstance(_n, ToolBox_IWS_JIL_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_JIL or _n.node_type == ToolBox_Entity_Types.FILE_JOB))]
 
     @property
     def JIL_file_node_keys (self) -> list[str]:
@@ -129,17 +149,20 @@ class ToolBox_Manager :
     @property
     def CSV_file_nodes (self) -> list[ToolBox_CSV_File_Node]:
         """Returns this a list of all *.csv Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_CSV_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_CSV)]
+        return self.dataSilo.CSV_file_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_CSV_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_CSV)]
     
     @property
     def XLSX_file_nodes (self) -> list[ToolBox_XLSX_File_Node]:
         """Returns this a list of all *.xlsx Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_XLSX_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_XLSX)]
+        return self.dataSilo.XLSX_file_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_XLSX_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_XLSX)]
 
     @property
     def IWS_Runbook_file_nodes (self) -> list[ToolBox_IWS_XLSX_Runbook_File_Node]:
         """Returns this a list of all *.xlsx Runbook Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_XLSX_Runbook_File_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_XLS_RUNBOOK)]
+        return self.dataSilo.IWS_Runbook_file_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_XLSX_Runbook_File_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_XLS_RUNBOOK)]
 
     @property
     def CSV_file_node_keys (self) -> list[str]:
@@ -147,31 +170,38 @@ class ToolBox_Manager :
         return [_n.id_key for _n in self._nodes.values() if isinstance(_n, ToolBox_CSV_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_CSV)]
 
     @property
-    def IWS_object_nodes (self) -> list[ToolBox_IWS_IWS_Obj_Node]:
+    def IWS_object_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
         """Returns this a list of all IWS Object Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_IWS_Obj_Node)]
+        return self.dataSilo.IWS_object_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_Obj_Node)]
     
     @property
-    def IWS_Job_Stream_nodes (self) -> list[ToolBox_IWS_IWS_Obj_Node]:
+    def IWS_Job_Stream_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
         """Returns this a list of all IWS Job Stream Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_IWS_Obj_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM)]
+        return self.dataSilo.IWS_Job_Stream_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_Obj_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM)]
 
     @property
-    def IWS_Job_nodes (self) -> list[ToolBox_IWS_IWS_Obj_Node]:
+    def IWS_Job_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
         """Returns this a list of all IWS Job Stream Nodes"""
-        return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_IWS_Obj_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_JOB)]
-        
+        return self.dataSilo.IWS_Job_nodes
+        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_Obj_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_JOB)]
+    
+    @property
+    def node_stats (self) -> str:
+        return self.dataSilo.statistics
 
     #------- Methods / Functions -------#
 
     @ToolBox_Decorator
-    def insert_node_object (self, node:ToolBox_ECS_Node, overwrite_node:bool = False):
+    def append_node_object (self, node:ToolBox_ECS_Node, overwrite_node:bool = False):
         """Adds a premade node to the ESC node list"""
         if isinstance(node, ToolBox_ECS_Node):
             if (overwrite_node == False) and (node.id_key in self._nodes.keys()):
                 self.log.warning(f" Unable to add Node to system, Node Key : [{node.id_key}] - '{node.name}' already exists.")
                 return
-            self._nodes[node.id_key] = node
+            self.dataSilo.append_node(node)
+            #self._nodes[node.id_key] = node
 
 
     @ToolBox_Decorator
@@ -187,7 +217,7 @@ class ToolBox_Manager :
         containing_terms: Optional[list[str]] = None,
         last_modified: Optional[datetime] = None,
         quite_logging:bool = True,
-        list_as_tables:bool = False
+        list_as_tables:bool = True
     ) -> list [ToolBox_ECS_File_Node]:
         """
         Scans a directory for files matching criteria and returns a list of ToolBox_ECS_File_Node objects that represent a found file.
@@ -252,7 +282,8 @@ class ToolBox_Manager :
                         self.log.warning(f"Unknown registered file format, skipping file : '{_filePath}'")
                 if (isinstance(_file_node, ToolBox_ECS_File_Node)) and (_file_node.id_key not in self._nodes.keys()):
                     _results.append(_file_node)
-                    self._nodes[_file_node.id_key] = _file_node
+                    self.dataSilo.append_node(_file_node)
+                    #self._nodes[_file_node.id_key] = _file_node
                     if (quite_logging != True) : self.log.debug (f"Adding Node : [{_file_node.id_key}] - '{_file_node.node_type}' defined in file '{_file_node.sourceFilePath}'")
         if len(_results) >= 1:
             relFilePaths = [_f.relFilePath for _f in _results]
@@ -275,9 +306,12 @@ class ToolBox_Manager :
             last_modified: Optional[datetime] = None,
             skip_duplicates:bool = False,
             quite_logging:bool = True,
+            enable_post_porcesses:bool = True,
+            contents_as_entities:bool = False
         ) -> list[ToolBox_ECS_File_Node]:
         """Loads any tracked File Nodes, if the file type is able to produce ToolBox_ECS_Nodes, they will be laoded into ToolBox."""
-        _files = [_n for _n in self.file_nodes]
+        _files = [_n for _n in self.dataSilo.file_nodes]
+        #_files = [_n for _n in self.file_nodes]
         for _node in _files:
             if isinstance(_node,ToolBox_ECS_File_Node):
                 _filePath = _node.sourceFilePath
@@ -293,10 +327,10 @@ class ToolBox_Manager :
                     continue                
                 if (node_file_types is not None) and (not any(_node.node_type == _nt for _nt in node_file_types)):
                     continue
-                if hasattr(_node, 'open_file'):
+                if hasattr(_node, 'open_file') and contents_as_entities == False:
                     #try:
                         # Try calling with skip_duplicates if supported
-                        _node.open_file(quite_logging=quite_logging, skip_duplicates=skip_duplicates) # type: ignore
+                        _node.open_file(quite_logging=quite_logging, skip_duplicates=skip_duplicates, enable_post_porcesses=enable_post_porcesses) # type: ignore
                     #except TypeError:
                     #    # Fallback for implementations that don't accept skip_duplicates
                     #    try:
@@ -305,6 +339,8 @@ class ToolBox_Manager :
                     #        self.log.warning(f"Failed to open node ({type(_node)}) [{_node.id_key}] : {_node.name} - {_ex}")
                     #except Exception as _ex:
                     #    self.log.warning(f"Failed to open node ({type(_node)}) [{_node.id_key}] : {_node.name} - {_ex}")
+                elif contents_as_entities == True and isinstance(_node, ToolBox_IWS_JIL_File_Node) and hasattr(_node, 'load_contents_as_entities'):
+                    _node.load_contents_as_entities()
                 else:
                     self.log.warning(f"Node ({type(_node)}) [{_node.id_key}] : {_node.name} is missing 'open_file()' method.")
                     continue
