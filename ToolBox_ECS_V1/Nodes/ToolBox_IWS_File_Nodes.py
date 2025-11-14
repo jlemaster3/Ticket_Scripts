@@ -445,13 +445,14 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
             self._modified_line_scores = []
             _curr_stream_entity:str|None = None
             _curr_job_entity:str|None = None
-            _last_stream_entity:str|None = None
-            _last_job_entity:str|None = None
+            _last_stream_key:str|None = None
+            _last_job_key:str|None = None
             _curr_stream_data:dict[str,Any]|None = None
             _curr_job_data:dict[str,Any]|None = None
-            _curr_stream_notes:list[str]|None = None
+            _curr_note_block:list[str]|None = None
             _curr_stream_idx:int = 0
             _curr_job_idx:int = 0
+            _curr_runcycle_data:dict[str, Any]|None = None
             for _line_idx, _line_str in enumerate(self._modified_file_text.splitlines()):
                 _line_score = ToolBox_line_score_data(
                     source_index= _line_idx,
@@ -461,13 +462,9 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                     flags=[re.IGNORECASE]
                 )
                 self._modified_line_scores.append(_line_score)
-                if (ToolBox_REGEX_Patterns.NOTE_LINE.name in _line_score.high_score_pattern_names):
-                    if _curr_stream_notes is None:
-                        _curr_stream_notes = []
-                    _curr_stream_notes.append(_line_str)
                 if (ToolBox_REGEX_Patterns.IWS_STREAM_START_LINE.name in _line_score.high_score_pattern_names):
                     if _curr_stream_data is not None:
-                        _last_stream_entity = _curr_stream_entity
+                        _last_stream_key = _curr_stream_data['_hash'] or None
                         _curr_stream_entity = self.dataSilo.create_entity(
                             key_id = _curr_stream_data['_hash'] or None,
                             components = _curr_stream_data
@@ -490,12 +487,14 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                                 _curr_stream_data['name'] = _found_results['stream'] or None
                                 _uuid_string = f"{self.sourceFilePath}|{_curr_stream_data['workstation']}{_curr_stream_data['folder']}{_curr_stream_data['name']}.@"
                                 _curr_stream_data['_hash'] = gen_uuid_key(_uuid_string)
-                                if _curr_stream_notes is not None:
-                                    _curr_stream_data['pre_notes'] = '\n'.join(_curr_stream_notes)
-                                    _curr_stream_notes = None
+                                if _curr_note_block is not None:
+                                    _curr_stream_data['pre_notes'] = '\n'.join(_curr_note_block)
+                                    _curr_note_block = None
+                    continue
                 if (ToolBox_REGEX_Patterns.IWS_JOB_START_LINE.name in _line_score.high_score_pattern_names):
+                    # if in a current stream, add to data silo and close current stream then create a new data block for new stream.
                     if _curr_job_data is not None:
-                        _last_job_entity = _curr_job_entity
+                        _last_job_key = _curr_job_entity
                         _curr_job_entity = self.dataSilo.create_entity(
                             key_id = _curr_job_data['_hash'] or None,
                             components = _curr_job_data)
@@ -530,36 +529,133 @@ class ToolBox_IWS_JIL_File_Node (ToolBox_ECS_File_Node):
                                 _curr_job_data['_hash'] = gen_uuid_key(_uuid_string)
                                 if _curr_stream_data is not None and 'job_keys' in _curr_stream_data.keys():
                                     _curr_stream_data['job_keys'].append(_curr_job_data['_hash'])
-                                if _curr_stream_notes is not None:
-                                    _curr_job_data['pre_notes'] = '\n'.join(_curr_stream_notes)
-                                    _curr_stream_notes = None
+                                if _curr_note_block is not None:
+                                    _curr_job_data['pre_notes'] = '\n'.join(_curr_note_block)
+                                    _curr_note_block = None
+                    continue
                 if (ToolBox_REGEX_Patterns.BLANK_LINE.name in _line_score.high_score_pattern_names):
+                    # if in a current job, add to data silo and close current job
                     if _curr_job_data is not None:
-                        _last_job_entity = _curr_job_entity
+                        _last_job_key = _curr_job_data['_hash'] or None
                         self.dataSilo.create_entity(
                             key_id = _curr_job_data['_hash'] or None,
                             components = _curr_job_data)
                         _curr_job_entity = None
                         _curr_job_data = None
-                        
-
+                    continue
                 if (ToolBox_REGEX_Patterns.IWS_STREAM_END_LINE.name in _line_score.high_score_pattern_names):
+                    # if stream data has been found but not set, add the urrent stream to data silo.
                     if _curr_stream_data is not None:
-                        _last_stream_entity = _curr_stream_entity
+                        _last_stream_key = _curr_stream_entity
                         self.dataSilo.create_entity(
                             key_id = _curr_stream_data['_hash'] or None,
                             components = _curr_stream_data
                         )
                         _curr_stream_entity = None
                         _curr_stream_data = None
+                    # if job data has been found but not set, set last job data in current stream
                     if _curr_job_data is not None:
-                        _last_job_entity = _curr_job_entity
                         self.dataSilo.create_entity(
                             key_id = _curr_job_data['_hash'] or None,
                             components = _curr_job_data)
+                        if (_curr_note_block is not None and 
+                            _last_job_key is not None
+                        ):
+                            self.dataSilo.add_component(_last_job_key, 'post_notes', '\n'.join(_curr_note_block))
+                        _last_job_key = None
                         _curr_job_entity = None
                         _curr_job_data = None
                         _curr_job_idx = 0
-                
-                        
+                    continue
+                if any([_pn in _line_score.found_pattern_names for _pn in [
+                    ToolBox_REGEX_Patterns.IWS_ON_RUNCYCLE_GROUP_LINE.name,
+                    ToolBox_REGEX_Patterns.IWS_ON_RUNCYCLE_FREQ_LINE.name,
+                    ToolBox_REGEX_Patterns.IWS_ON_DAY_LINE.name,
+                    ToolBox_REGEX_Patterns.IWS_ON_DATE_LINE.name
+                ]]):
+                    # add each 'ON' line that is not an ON REQUEST line as an seprate entity, linked to the parent job stream
+                    _ON_line_data = {}
+                    for _result_list in _line_score.all_results.values():
+                        for _score, _match in _result_list:
+                            _found_results = _match.groupdict()
+                            for _k, _v in _found_results.items():
+                                _ON_line_data[_k] = _v
+                    
+                    _new_rcg_entity_data = {}
+                    if ToolBox_REGEX_Patterns.IWS_ON_RUNCYCLE_GROUP_LINE.name in _line_score.high_score_pattern_names:
+                        #sself.log.debug(f"[{_line_idx}] '{_line_str}'", data=_ON_line_data)
+                        _rcg_key_str = f"{self.sourceFilePath}|{_ON_line_data['name']}"
+                        if "exclude_env" in _ON_line_data.keys():
+                            _new_rcg_entity_data['exclude_env'] = _ON_line_data['exclude_env']
+                            _rcg_key_str = f"{_ON_line_data['exclude_env']}|{_rcg_key_str}"
+                        if "isolate_env" in _ON_line_data.keys():
+                            _new_rcg_entity_data['isolate_env'] = _ON_line_data['isolate_env']
+                            _rcg_key_str = f"{_ON_line_data['isolate_env']}|{_rcg_key_str}"
+                        _new_rcg_entity_data['_hash'] = gen_uuid_key(_rcg_key_str) or None
+                        _new_rcg_entity_data['obj_type'] = ToolBox_Entity_Types.IWS_RUNCYCLE
+                        _new_rcg_entity_data['sub_type'] = 'group'
+                        _new_rcg_entity_data['name'] = _ON_line_data['name']
+                        _new_rcg_entity_data['target_rcg'] = f"{_ON_line_data['folder']}{_ON_line_data['rcg']}"
+                        _new_rcg_entity_data['at_schedtime'] = _ON_line_data['at_shedtime']
+                        _new_rcg_entity_data['time'] = f"{_ON_line_data['hh']}{_ON_line_data['mm']}"
+                        if any([_kn in _ON_line_data.keys() for _kn in ['plus_minu','days']]):
+                            _new_rcg_entity_data['offset'] = f"{_ON_line_data['days']} DAY" + '' if int(_ON_line_data['days']) <= 1 else 'S'
+                        if any(['valid' in _pn.lower() for _pn in _line_score.found_pattern_names]):
+                            _data:list[Any]|None = None
+                            if ToolBox_REGEX_Patterns.IWS_VALIDTO.name in _line_score.found_pattern_names:
+                                _data = _line_score[ToolBox_REGEX_Patterns.IWS_VALIDTO.name]
+                            elif ToolBox_REGEX_Patterns.IWS_VALIDFROM.name in _line_score.found_pattern_names:
+                                _data = _line_score[ToolBox_REGEX_Patterns.IWS_VALIDFROM.name]
+                            if _data is not None:
+                                for _score, _match in _data:
+                                    if isinstance(_match, re.Match):
+                                        _new_rcg_entity_data['validfrom'] = f"{_ON_line_data['month']}/{_ON_line_data['day']}/{_ON_line_data['year']}"
+
+                                
+                    elif ToolBox_REGEX_Patterns.IWS_ON_RUNCYCLE_FREQ_LINE.name in _line_score.high_score_pattern_names:
+                        pass
+                    elif ToolBox_REGEX_Patterns.IWS_ON_DAY_LINE.name in _line_score.high_score_pattern_names:
+                        pass
+                    elif ToolBox_REGEX_Patterns.IWS_ON_DATE_LINE.name in _line_score.high_score_pattern_names:
+                        _new_rcg_entity_data['obj_type'] = ToolBox_Entity_Types.IWS_RUNCYCLE
+                        _new_rcg_entity_data['sub_type'] = 'date'
+                        _new_rcg_entity_data['dates'] = []
+                        self.log.debug(f"[{_line_idx}] '{_line_str}'")
+                        for _m in re.compile(ToolBox_REGEX_Patterns.YEAR_MONTH_DAY).finditer(_line_str):
+                            _grps = _m.groupdict()
+                            if all(_k in _grps.keys() for _k in ['year', 'month', 'day']):
+                                self.log.blank(data=_grps)
+                    
+                    if len(_new_rcg_entity_data.keys()) >= 1 and '_hash' in _new_rcg_entity_data.keys():
+                        self.dataSilo.create_entity(
+                            key_id = _new_rcg_entity_data['_hash'] or None,
+                            components = _new_rcg_entity_data
+                        )
+                        if _curr_stream_data is not None:
+                            if 'runcylces' not in _curr_stream_data.keys():
+                                _curr_stream_data['runcycles'] = []
+                            _curr_stream_data['runcycles'].append(_new_rcg_entity_data['_hash'])
+                    continue
+                if (ToolBox_REGEX_Patterns.NOTE_LINE.name in _line_score.high_score_pattern_names):
+                    if _curr_note_block is None:
+                        _curr_note_block = []
+                    _curr_note_block.append(_line_str)
+                    continue
+                # all else fails, add current line to current job first then stream if they are set
+                #if _line_str.strip() != '':
+                #    for _result_list in _line_score.all_results.values():
+                #        for _score, _match in _result_list:
+                #            _found_results = _match.groupdict()
+                #            for _k, _v in _found_results.items():
+                #                if _curr_job_data is not None:
+                #                    if _k not in _curr_job_data.keys():
+                #                        _curr_job_data[_k] = _v
+                #                elif _curr_stream_data is not None:
+                #                    if _k not in _curr_stream_data.keys():
+                #                        _curr_stream_data[_k] = _v
+
+            if (_curr_note_block is not None and 
+                _last_stream_key is not None
+            ):
+                self.dataSilo.add_component(_last_stream_key, 'post_notes', '\n'.join(_curr_note_block))
     

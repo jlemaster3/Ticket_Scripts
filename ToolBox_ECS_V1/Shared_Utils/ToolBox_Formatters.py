@@ -127,6 +127,18 @@ class ToolBox_line_score_data (UserDict):
         self._score = None
         self.evaluate_pattern()
 
+    def __setitem__(self, key, value):
+        if isinstance(value, str):
+            self.data[key] = value
+        else:
+            self.data[key] = value
+    
+    def __getitem__(self, key:str):
+        if isinstance(key, str):
+            if self._results is not None and key in self._results.keys():
+                return self._results.get(key)
+            return self.get(key)
+
     #-------public Getter & Setter methods -------#
 
     @property
@@ -174,7 +186,14 @@ class ToolBox_line_score_data (UserDict):
 
     @property
     def all_results (self) -> dict[str,list[tuple[int,re.Match]]]:
+        """Returns the collection of found patterns by name, that coresponds to a list of score values and Match objects pairs"""
         return self._results if self._results is not None else {}
+
+    @property
+    def found_pattern_names (self) -> list[str]:
+        """Returns the list of all found pattern names in line score"""
+        return [_n for _n in self._results.keys()] if self._results is not None else []
+    
 
     #------- Methods / Functions -------#
 

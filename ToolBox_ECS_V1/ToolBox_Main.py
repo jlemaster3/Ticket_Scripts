@@ -117,7 +117,6 @@ class ToolBox_Manager :
     def nodes (self) -> list[ToolBox_ECS_Node]:
         """Returns this a list of all Nodes"""
         return self.dataSilo.nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_Node)]
     
     @property
     def node_keys (self) -> list[str]:
@@ -128,7 +127,6 @@ class ToolBox_Manager :
     def file_nodes (self) -> list[ToolBox_ECS_File_Node]:
         """Returns this a list of all File Nodes"""
         return self.dataSilo.file_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_ECS_File_Node)]
     
     @property
     def file_node_keys (self) -> list[str]:
@@ -139,7 +137,6 @@ class ToolBox_Manager :
     def JIL_file_nodes (self) -> list[ToolBox_IWS_JIL_File_Node]:
         """Returns this a list of all *.jil or *.job File Nodes"""
         return self.dataSilo.JIL_file_nodes
-        #return [_n for _n in self._nodes.values() if (isinstance(_n, ToolBox_IWS_JIL_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_JIL or _n.node_type == ToolBox_Entity_Types.FILE_JOB))]
 
     @property
     def JIL_file_node_keys (self) -> list[str]:
@@ -150,19 +147,16 @@ class ToolBox_Manager :
     def CSV_file_nodes (self) -> list[ToolBox_CSV_File_Node]:
         """Returns this a list of all *.csv Nodes"""
         return self.dataSilo.CSV_file_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_CSV_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_CSV)]
     
     @property
     def XLSX_file_nodes (self) -> list[ToolBox_XLSX_File_Node]:
         """Returns this a list of all *.xlsx Nodes"""
         return self.dataSilo.XLSX_file_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_XLSX_File_Node) and (_n.node_type == ToolBox_Entity_Types.FILE_XLSX)]
 
     @property
     def IWS_Runbook_file_nodes (self) -> list[ToolBox_IWS_XLSX_Runbook_File_Node]:
         """Returns this a list of all *.xlsx Runbook Nodes"""
         return self.dataSilo.IWS_Runbook_file_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_XLSX_Runbook_File_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_XLS_RUNBOOK)]
 
     @property
     def CSV_file_node_keys (self) -> list[str]:
@@ -172,20 +166,17 @@ class ToolBox_Manager :
     @property
     def IWS_object_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
         """Returns this a list of all IWS Object Nodes"""
-        return self.dataSilo.IWS_object_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_Obj_Node)]
+        return self.dataSilo.IWS_object_nodes        
     
     @property
     def IWS_Job_Stream_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
         """Returns this a list of all IWS Job Stream Nodes"""
         return self.dataSilo.IWS_Job_Stream_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_Obj_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_JOB_STREAM)]
 
     @property
     def IWS_Job_nodes (self) -> list[ToolBox_IWS_Obj_Node]:
         """Returns this a list of all IWS Job Stream Nodes"""
-        return self.dataSilo.IWS_Job_nodes
-        #return [_n for _n in self._nodes.values() if isinstance(_n, ToolBox_IWS_Obj_Node) and (_n.node_type == ToolBox_Entity_Types.IWS_JOB)]
+        return self.dataSilo.IWS_Job_nodes        
     
     @property
     def node_stats (self) -> str:
@@ -348,19 +339,6 @@ class ToolBox_Manager :
                 continue
         return _files
     
-    @ToolBox_Decorator
-    def action_duplicate_node(self,
-        source_key:str,
-        filter_func:Callable[[ToolBox_ECS_Node], bool],
-        search_replace_terms:dict[str,str|int|float|bool|datetime|None]
-        ) : 
-        """W.I.P. - Not completed or working - Copy the source node and assigns it a new ID key, keeping all other settings of the node"""
-        _source_node = self._nodes.get(source_key)
-        if _source_node is None:
-            self.log.warning(f"Source key not found in node list : ", data=source_key)
-            return None
-        if not filter_func(_source_node):
-            return None
         
     @ToolBox_Decorator
     def Foramt_list_of_dictionaries_to_multiline_str (self, source_row_list:list[dict[str,Any]]) -> str:
@@ -368,40 +346,5 @@ class ToolBox_Manager :
         #exposes the Formatting option through Toolbox caller
         return _list_of_rows_to_Strings(source_row_list)
     
-    @ToolBox_Decorator
-    def Action_IWS_nodes_Duplicate_to_New_Agent (self,
-            source_IWS_file_nodes:list[ToolBox_IWS_JIL_File_Node],
-            Output_Folder_path:str ,
-            Search_Replace_Terms:dict[str,str],
-            quite_logging:bool = True
-        ) -> list[ToolBox_IWS_JIL_File_Node] | None:
-        """For each file in source path, find all IWS assets, and duplicate them, then preform a search and replace on teh duplicated assest's text.
-        Append the duplcated and udpated text to the current file, and save a copy of the file to a new location for review.
-        Returns a list of pointers to the nodes that have been changed.
-
-        !!! - This action does not save the changed or modified node. - !!!
-        """
-        _changed_list:list[ToolBox_IWS_JIL_File_Node]|None = None
-        for _file_index, _file_node in enumerate(source_IWS_file_nodes):
-            if isinstance(_file_node,ToolBox_IWS_JIL_File_Node):
-                _has_been_updated:bool = False
-                self.log.info (f"[{_file_index+1}] Processing file '{_file_node.relFilePath}'")
-                _file_node.open_file(
-                    enable_post_porcesses=False
-                )
-                _copy_of_text:str|None = copy.deepcopy(_file_node._source_file_text) or None
-                
-                if isinstance(_copy_of_text, str):
-                    for _search, _replace in Search_Replace_Terms.items():
-                        _replaced = _copy_of_text.replace(_search,_replace)
-                        if _replaced != _copy_of_text:
-                            if (quite_logging != True) :self.log.debug (f"Found search term '{_search}' and repalcing with '{_replace}'")
-                            _copy_of_text = _replaced
-                            _has_been_updated = True
-                if _has_been_updated == True and isinstance(_copy_of_text, str):
-                    if _changed_list is None:
-                        _changed_list = []
-                    _changed_list.append(_file_node)
-        return _changed_list
 
 ToolBox:ToolBox_Manager = ToolBox_Manager().get_instance()

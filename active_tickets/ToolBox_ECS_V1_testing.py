@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     _file_list = ToolBox.collect_files_as_nodes(
         source_dir = source_path,
-        #isolate_directory_names= ['prod'],
+        isolate_directory_names= ['prod'],
         isolate_fileName_names = ["Temp_test"],
         isolate_formats=['jil','job'],
         quite_logging=False
