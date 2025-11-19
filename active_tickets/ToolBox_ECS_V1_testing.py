@@ -65,7 +65,7 @@ if __name__ == "__main__":
     log.blank('-'*100)
 
     for _col_idx, _col_name in enumerate(ToolBox.dataSilo.get_column_names):
-        _entities_with_col = ToolBox.dataSilo.get_entities_with(_col_name)
+        _entities_with_col = ToolBox.dataSilo.get_entities_with_components(_col_name)
         log.blank(f"[{_col_idx}] '{_col_name}' [{len(_entities_with_col)}]")
 
     
