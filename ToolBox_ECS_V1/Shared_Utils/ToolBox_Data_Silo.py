@@ -311,7 +311,7 @@ class ToolBox_Data_Silo_Manager (UserDict):
         return {str(k): v for k, v in series_dict.items()}
     
     @ToolBox_Decorator
-    def get_entities_with (self, components: Union[str, list[str]]) -> pd.DataFrame:
+    def get_entities_with_components (self, components: Union[str, list[str]]) -> pd.DataFrame:
         """Returns enitites that have specific components(s) present."""
         if isinstance(components, str):
             components = [components]
