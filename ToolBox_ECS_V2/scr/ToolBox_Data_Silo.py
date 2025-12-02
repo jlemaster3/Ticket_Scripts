@@ -281,7 +281,7 @@ class ToolBox_Data_Silo_Manager:
         if component_name not in self._dataframe.columns:
             return default
         value = self._dataframe.at[key, component_name]
-        if (value is None):
+        if (value is None or (isinstance(value, float) and pd.isna(value))):
             return default
         return value
 
@@ -293,7 +293,7 @@ class ToolBox_Data_Silo_Manager:
         if component_name not in self._dataframe.columns:
             return False
         value = self._dataframe.at[key, component_name]
-        return (value is not None or not all(pd.isna(value)))
+        return value is not None and not(isinstance(value, float) and pd.isna(value))
     
     @ToolBox_Decorator
     def entity_exists(self, key:str) -> bool:

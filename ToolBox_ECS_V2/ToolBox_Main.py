@@ -74,6 +74,14 @@ class ToolBox_Manager :
     
     #-------public Getter & Setter methods -------#    
     
+    @property
+    def JIL_file_keys(self) -> list[str]:
+        """Returns a list of entity keys for all JIL file nodes in the data silo."""
+        return self.dataSilo.get_entity_keys_by_component_value(
+            component='object_type',
+            value=ToolBox_Entity_Types.FILE_JIL
+        )
+
     @ToolBox_Decorator
     def collect_files (self,
         source_dir: str,
@@ -140,7 +148,7 @@ class ToolBox_Manager :
                 }
                 match _file_extension.lower():
                     case '.txt':
-                        if 'JobDefinitions' in _filePath:
+                        if 'JobDefinitions' in _file_name:
                             _file_metadata['object_type'] = ToolBox_Entity_Types.FILE_JIL
                         else:
                             _file_metadata['object_type'] = ToolBox_Entity_Types.FILE_TXT
