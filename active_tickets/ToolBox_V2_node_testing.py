@@ -42,7 +42,7 @@ if __name__ == "__main__":
     ToolBox.collect_files (
         source_dir=source_path,
         #isolate_directory_names= ['prod'],
-        isolate_fileName_names = ["cal", "cals"],
+        isolate_fileName_names = ["RCG"],
         isolate_formats=['jil', 'job', 'json', 'txt', 'csv'],
         quite_logging=False
     )
@@ -58,25 +58,35 @@ if __name__ == "__main__":
     #ToolBox.IWS_JIL_File_Manager.load_files(quite_logging=False)
     log.blank('-'*100)
     
-    ToolBox.Action_Manager.calendar_report_to_CSV(
-        output_name="calendar_names_ranges.csv",
-        output_path=working_directory
-    )
+    #ToolBox.Action_Manager.calendar_report_to_CSV(
+    #    output_name="calendar_names_ranges.csv",
+    #    output_path=working_directory
+    #)
 
-    _config_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.FILE_JSON )
-    _stream_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_JOB_STREAM )
-    _job_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_JOB )
-    _calendar_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_CALENDAR )
-    _csv_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.FILE_CSV )
     
-    _merged_key_list = _csv_keys
+
+    _config_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.FILE_JSON)
+    _stream_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_JOB_STREAM)
+    _job_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_JOB)
+    _calendar_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_CALENDAR)
+    _csv_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.FILE_CSV)
+    _rcg_keys:list[str] = ToolBox.dataSilo.get_entity_keys_by_component_value( component='object_type', value=ToolBox.Entity_Types.IWS_RUNCYCLEGROUP)
+    _merged_key_list = _stream_keys + _job_keys +_csv_keys + _rcg_keys
     
     log .info (f"Total of [{len(_merged_key_list)}] of IWS assets loaded : ")
     log.blank('-'*100)
     for _key_counter, _key in enumerate(_merged_key_list):
+        
         log.blank(f"[{_key_counter + 1}] {_key}", data =ToolBox.dataSilo.get_entity(_key))
         log.blank('-'*100)
     
+
+    ToolBox.Action_Manager.RCG_report_to_CSV (
+        output_name = "RCG_date_ranges", 
+        output_path = working_directory, 
+        #component_filters = {"date_values": lambda dates: dates is not None and len(dates) >= 1}
+    )
+
     log.blank('-'*100)
     
     log.blank(ToolBox.dataSilo.statistics)

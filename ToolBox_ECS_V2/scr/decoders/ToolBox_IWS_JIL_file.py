@@ -14,7 +14,8 @@ from ..shared_utils.ToolBox_Enums import (
     ToolBox_REGEX_Patterns
 )
 from ..shared_utils.ToolBox_Utils import (
-    gen_uuid_key
+    gen_uuid_key,
+    ToolBox_REGEX_score_evaluator
 )
 
 #-------------------------------------------------
@@ -29,146 +30,7 @@ def ToolBox_Decorator(func):
 
 #-------------------------------------------------
 #   classes
-#-------------------------------------------------
-
-class text_score_evaluator:
-
-    #------- public properties -------#
-    log:OutputLogger = OutputLogger().get_instance()
-    
-    #------- private properties -------#
-    _line_index:int
-    _text:str
-    _flags:list[re.RegexFlag]
-    _results:dict[str,list[tuple[int, re.Match]]]
-    _filter_AnyOrAll:ToolBox_Amount_Options|str|None
-    _filter_patterns:list[str]|None
-    _bonus_score:int|None
-
-    #------- Initialize class -------#
-
-    def __init__ (self, 
-        text:str, 
-        line_index:int,
-        filter_patterns:list[str]|None = None,
-        filter_AnyOrAll:ToolBox_Amount_Options|str|None = None,
-        flags:list[re.RegexFlag]|None = None,
-        bonus_score:int|None = None
-    ):
-        self._text = text
-        self._line_index = line_index
-        self._flags = flags or [re.IGNORECASE]
-        if any(_p in text for _p in ['\n', '\r']) and re.MULTILINE not in self._flags:
-            self._flags.append(re.MULTILINE)
-        self._filter_patterns = filter_patterns
-        try:
-            self._filter_AnyOrAll = filter_AnyOrAll if (
-                (filter_AnyOrAll is not None) and 
-                    (isinstance(filter_AnyOrAll, ToolBox_Amount_Options) or 
-                        (isinstance(filter_AnyOrAll,str) and 
-                            filter_AnyOrAll in ToolBox_Amount_Options
-                        )
-                    )
-                ) else ToolBox_Amount_Options.ANY
-        except:
-            self._filter_AnyOrAll = ToolBox_Amount_Options.ANY
-        self._bonus_score = bonus_score
-        self.evaluate_text()
-
-    #-------public Getter & Setter methods -------#
-
-    @property
-    def line_index(self) -> int:
-        return self._line_index
-    
-    @property
-    def text(self) -> str:
-        return self._text
-    
-    @text.setter
-    def text(self, value: str):
-        self._text = value
-
-
-    @property
-    def found_pattern_names (self) -> list[str]:
-        """Returns the list of all found pattern names in line score"""
-        return [_n for _n in self._results.keys()] if self._results is not None else []
-    
-    @property
-    def get_highest_scoreing_pattern_names (self) -> list[str]:
-        """Returns the list of highest scoring pattern names in line score"""
-        _highest_score:int = 0
-        _highest_names:list[str] = []
-        for _p_name, _p_results in self._results.items():
-            _max_score = max([_r[0] for _r in _p_results]) if len(_p_results) > 0 else 0
-            if _max_score > _highest_score:
-                _highest_score = _max_score
-                _highest_names = [_p_name]
-            elif _max_score == _highest_score:
-                _highest_names.append(_p_name)
-        return _highest_names
-    
-    @property
-    def all_results(self) -> dict[str,list[tuple[int, dict[str,Any]]]]:
-        """Returns a collection of all results with their scores and match details."""
-        _results:dict[str,list[tuple[int, dict[str,Any]]]] = {}
-        for _pattern_name, _pattern_results in self._results.items():
-            _results[_pattern_name] = [(_score, _match.groupdict()) for _score, _match in _pattern_results]
-        return _results
-    
-    #------- Methods / Functions -------#
-
-    @ToolBox_Decorator
-    def evaluate_text (self):
-        """Evaluates the text against all regex patterns and scores them."""
-        _flag_val = sum(self._flags)
-        self._results = {}
-        for _pattern_name, _pattern in ToolBox_REGEX_Patterns.__members__.items():
-            _results = re.finditer(_pattern, self._text, _flag_val)
-            if _results is not None:
-                _score:int = 0 if (self._bonus_score is None) else self._bonus_score
-                _pattern_name_parts = _pattern_name.split('_')
-                if ((self._filter_patterns is not None) and 
-                    (self._filter_AnyOrAll == ToolBox_Amount_Options.ALL) and 
-                    not (all([_f.upper() in _pattern_name.upper() for _f in self._filter_patterns]))
-                ):
-                    for _f in self._filter_patterns:
-                        if re.search(rf"(?:\b|_){_f}(?:\b|_)", _pattern_name, re.IGNORECASE):
-                            _score += 20
-                elif ((self._filter_patterns is not None) and 
-                    (self._filter_AnyOrAll == ToolBox_Amount_Options.ANY)
-                ):
-                    for _f in self._filter_patterns:
-                        if re.search(rf"(?:\b|_){_f}(?:\b|_)", _pattern_name, re.IGNORECASE):
-                            _score += 15
-                if(self._filter_patterns is not None):
-                    _score -= 5 *len([_pn_w for _pn_w in _pattern_name_parts if all([_pn_w.upper() != _f for _f in self._filter_patterns])])
-                if 'note' in _pattern_name.lower():
-                    _score += 20
-                for _r in _results:
-                    if isinstance(_r, re.Match):
-                        _nonNone_groups = [_grp_v for _grp_v in _r.groupdict().values() if _grp_v is not None and _grp_v.strip() != '']
-                        _None_groups = [_grp_v for _grp_v in _r.groupdict().values() if _grp_v is None or _grp_v.strip() == '']
-                        _reults_len:int = len(_r.groupdict().keys())
-                        if len(_nonNone_groups) >= 1:
-                            _score += 5 * abs(_reults_len-len(_nonNone_groups))
-                        if len(_None_groups) >= 1:
-                            _score -= 5 * abs(len(_None_groups) - _reults_len)
-                        _score += 5 * _reults_len
-                        if _pattern_name not in self._results.keys():
-                            self._results[_pattern_name] = []
-                        self._results[_pattern_name].append((_score, _r))
-
-    @ToolBox_Decorator
-    def get_results_for_pattern(self, pattern_name: str) -> list[dict[str,Any]]:
-        """Returns a list of dictionaries containing the match details for a given pattern name."""
-        _results = [_r[1].groupdict() for _r in self._results.get(pattern_name, [])]
-        return _results
-
-        
-
-
+#-------------------------------------------------   
 
 class ToolBox_IWS_JIL_File_Manager :
     """Object class that handles Jil files."""   
@@ -234,6 +96,35 @@ class ToolBox_IWS_JIL_File_Manager :
             self.extract_IWS_streams()
 
     @ToolBox_Decorator
+    def save_files(self, outputFolder:str|None=None, useRelPath:bool=False, quite_logging:bool=True, **component_filters):
+        """Saves file entities from their respective objects based on entity type."""
+        if len(self.file_keys) == 0:
+            self.log.info("No JIL files found in collection to save.")
+            return
+        _key_list = self.datasilo.get_entity_keys_by_component_value('object_type', ToolBox_Entity_Types.FILE_JIL, **component_filters) if component_filters is not None and len(component_filters) > 0 else self.file_keys
+        print (f"Saving {len(_key_list)} JIL files...")
+        _e_counter_size = len(str(len(_key_list)))
+
+        for _e_counter, _e_key in enumerate(_key_list):
+            _e_data:dict[str,Any] = self.datasilo.get_entity(_e_key)
+            _outputPath:str|None = outputFolder if outputFolder is not None else _e_data.get('full_path',None)
+            if useRelPath == True and isinstance(_outputPath, str):
+                _rel_path = _e_data.get('file_path',None)
+                if isinstance(_rel_path, str):
+                    _outputPath = os.path.join(_outputPath, _rel_path)
+                os.makedirs(_outputPath, exist_ok=True)
+            _file_name = f"{_e_data.get('file_name', None)}{_e_data.get('file_format', None)}"
+            if isinstance(_outputPath, str) and isinstance(_file_name, str):
+                _file_full_path = os.path.join(_outputPath, _file_name)
+                try:
+                    _file_text = self.datasilo.get_component(_e_key, 'file_text', '')
+                    with open(_file_full_path, "w", encoding="utf-8") as f:
+                        f.write(_file_text)
+                    if (quite_logging != True) : self.log.info(f"[{str(_e_counter+1).rjust(_e_counter_size, '0')}] Saved IWS JIL file : '{_file_full_path}'")
+                except Exception as e:
+                    self.log.error(f"An unexpected error occurred while saving '{_file_full_path}'", data = e)
+
+    @ToolBox_Decorator
     def extract_IWS_streams(self, **component_filters):
         """Extracts the Job Stream entities from the loaded JIL File data"""
         _key_list = self.datasilo.get_entity_keys_by_component_value('object_type', ToolBox_Entity_Types.FILE_JIL, **component_filters) if component_filters is not None and len(component_filters) > 0 else self.file_keys
@@ -295,7 +186,7 @@ class ToolBox_IWS_JIL_File_Manager :
                         if (_line_idx/len(_e_str_rows))*100 >= _max_percent:
                             break
                         self.log.debug(f"Line : [{_line_idx}] {round((_line_idx/len(_e_str_rows))*100, 2)}% | Job Stream Count: [{len(self.datasilo.get_entity_keys_by_component_value(component='object_type', value=ToolBox_Entity_Types.IWS_JOB_STREAM))}] |  Job Count: [{len(self.datasilo.get_entity_keys_by_component_value(component='object_type', value=ToolBox_Entity_Types.IWS_JOB))}]")
-                    _evaluator = text_score_evaluator(
+                    _evaluator = ToolBox_REGEX_score_evaluator(
                         text=_line_str,
                         line_index=_line_idx,
                         filter_patterns=['IWS', 'JOB', 'STREAM', 'LINE'],
